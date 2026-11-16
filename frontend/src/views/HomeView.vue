@@ -1,28 +1,19 @@
 <script setup>
 import Navbar from '../components/Navbar.vue'
 import LoginModal from '../components/LoginModal.vue'
-import {useAuthStore} from '../store/auth'
-
-const auth = useAuthStore()
+import {Sparkles} from 'lucide-vue-next'
 </script>
 
 <template>
   <div class="home-page">
     <Navbar/>
-
     <main class="main-content">
       <div class="welcome-card">
-        <h1 v-if="!auth.isLoggedIn" class="greeting">
-          你好，游客！欢迎来到花红医药 Agent。
-        </h1>
-        <h1 v-else class="greeting">
-          你好，{{ auth.username }}！欢迎回来。
-        </h1>
-        <p class="subtitle">这是一个基于 LangGraph 构建的医药智能体系统。</p>
+        <Sparkles :size="48" color="#ef4444"/>
+        <h1>你好，游客！欢迎来到花红医药 Agent。</h1>
+        <p>请点击右上角登录，体验不同角色下的智能工作台。</p>
       </div>
     </main>
-
-    <!-- 全局登录弹窗 -->
     <LoginModal/>
   </div>
 </template>
@@ -31,6 +22,7 @@ const auth = useAuthStore()
 .home-page {
   min-height: 100vh;
   background-color: #f3f4f6;
+  padding-top: 64px;
 
   .main-content {
     display: flex;

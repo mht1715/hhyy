@@ -8,6 +8,15 @@ body {
   font-family: system-ui, -apple-system, sans-serif;
   background-color: #f3f4f6;
   color: #1f2937;
+  -webkit-font-smoothing: antialiased; /* 让手机端字体更平滑 */
+  overflow-x: hidden; /* 防止横向溢出 */
+}
+
+/* 移动端基础字号调整 */
+@media (max-width: 768px) {
+  html {
+    font-size: 14px; /* 默认 16px，移动端稍微调小 */
+  }
 }
 
 // 公共卡片样式

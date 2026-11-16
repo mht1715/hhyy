@@ -1,12 +1,14 @@
 <script setup>
 import {useAuthStore} from '../store/auth'
+import {useRouter} from 'vue-router'
 import {X, ShieldCheck, Stethoscope, User} from 'lucide-vue-next'
 
 const auth = useAuthStore()
-
-const quickLogin = async (username) => {
+const router = useRouter()
+const quickLogin = async (username, rolePath) => {
   try {
     await auth.login(username)
+    router.push(rolePath)
   } catch (err) {
     alert('登录失败，请确保后端服务已启动')
   }
@@ -26,7 +28,7 @@ const quickLogin = async (username) => {
 
         <div class="account-list">
           <!-- 管理员 -->
-          <div class="account-card" @click="quickLogin('admin')">
+          <div class="account-card" @click="quickLogin('admin', '/admin')">
             <div class="icon-wrapper bg-red">
               <ShieldCheck :size="28" color="white"/>
             </div>
@@ -37,7 +39,7 @@ const quickLogin = async (username) => {
           </div>
 
           <!-- 医生 -->
-          <div class="account-card" @click="quickLogin('doctor')">
+          <div class="account-card" @click="quickLogin('doctor', '/doctor')">
             <div class="icon-wrapper bg-blue">
               <Stethoscope :size="28" color="white"/>
             </div>
@@ -48,7 +50,7 @@ const quickLogin = async (username) => {
           </div>
 
           <!-- 患者 -->
-          <div class="account-card" @click="quickLogin('patient')">
+          <div class="account-card" @click="quickLogin('patient', '/patient')">
             <div class="icon-wrapper bg-green">
               <User :size="28" color="white"/>
             </div>
@@ -185,6 +187,37 @@ const quickLogin = async (username) => {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@media (max-width: 768px) {
+  .modal-overlay {
+    .modal-content {
+      width: 90% !important; // 手机上占屏幕 90%
+      padding: 24px 16px !important;
+      max-width: 400px;
+
+      .account-list {
+        .account-card {
+          padding: 10px !important;
+
+          .icon-wrapper {
+            width: 40px !important;
+            height: 40px !important;
+          }
+
+          .info {
+            .role-name {
+              font-size: 14px !important;
+            }
+
+            .username {
+              font-size: 12px !important;
+            }
+          }
+        }
+      }
+    }
   }
 }
 </style>

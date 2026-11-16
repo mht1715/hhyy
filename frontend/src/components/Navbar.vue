@@ -1,9 +1,11 @@
 <script setup>
 import {ref} from 'vue'
 import {useAuthStore} from '../store/auth'
+import {useRouter} from 'vue-router'
 import {Hexagon, UserCircle, ChevronDown, LogOut, RefreshCw} from 'lucide-vue-next'
 
 const auth = useAuthStore()
+const router = useRouter()
 const isDropdownOpen = ref(false)
 
 const toggleDropdown = () => {
@@ -14,10 +16,11 @@ const toggleDropdown = () => {
   }
 }
 
-const switchAccount = async (username) => {
+const switchAccount = async (username, rolePath) => {
   try {
     await auth.login(username)
     isDropdownOpen.value = false
+    router.push(rolePath)
   } catch (e) {
     alert('切换失败')
   }
@@ -26,6 +29,7 @@ const switchAccount = async (username) => {
 const handleLogout = () => {
   auth.logout()
   isDropdownOpen.value = false
+  router.push('/')
 }
 
 const roleColorMap = {admin: '#ef4444', doctor: '#3b82f6', patient: '#10b981'}
@@ -61,9 +65,9 @@ const roleNameMap = {admin: '管理员', doctor: '医生', patient: '患者'}
             <RefreshCw :size="14"/>
             快捷切换账号
           </div>
-          <div class="dropdown-item" @click="switchAccount('admin')">admin (管理员)</div>
-          <div class="dropdown-item" @click="switchAccount('doctor')">doctor (医生)</div>
-          <div class="dropdown-item" @click="switchAccount('patient')">patient (患者)</div>
+          <div class="dropdown-item" @click="switchAccount('admin', '/admin')">admin (管理员)</div>
+          <div class="dropdown-item" @click="switchAccount('doctor', '/doctor')">doctor (医生)</div>
+          <div class="dropdown-item" @click="switchAccount('patient', '/patient')">patient (患者)</div>
           <div class="dropdown-divider"></div>
           <div class="dropdown-item text-danger" @click="handleLogout">
             <LogOut :size="14"/>
@@ -80,14 +84,23 @@ const roleNameMap = {admin: '管理员', doctor: '医生', patient: '患者'}
 <style scoped lang="scss">
 .navbar {
   height: 64px;
-  background-color: #ffffff;
+  /* 核心：固定定位 */
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+
+  /* 毛玻璃质感（半透明白底 + 背景模糊） */
+  background-color: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px); /* 兼容 Safari */
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 0 24px;
-  position: relative;
-  z-index: 100;
 
   .left-brand {
     display: flex;
@@ -167,7 +180,7 @@ const roleNameMap = {admin: '管理员', doctor: '医生', patient: '患者'}
         box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
         border: 1px solid #e5e7eb;
         padding: 8px 0;
-        z-index: 101;
+        z-index: 1001;
 
         .dropdown-header {
           font-size: 12px;
@@ -215,6 +228,38 @@ const roleNameMap = {admin: '管理员', doctor: '医生', patient: '患者'}
     inset: 0;
     z-index: 99;
     background: transparent;
+  }
+}
+
+@media (max-width: 768px) {
+  .navbar {
+    padding: 0 12px !important; // 减小两侧留白
+
+    .left-brand {
+      gap: 8px !important;
+
+      .brand-name {
+        font-size: 16px !important; // 调小 Logo 文字
+      }
+    }
+
+    .right-user {
+      .user-profile {
+        .profile-trigger {
+          padding: 4px 8px !important;
+          gap: 4px !important;
+
+          .username {
+            display: none; // 手机端隐藏用户名，只留头像和角色
+          }
+
+          .role-badge {
+            font-size: 11px !important;
+            padding: 1px 6px !important;
+          }
+        }
+      }
+    }
   }
 }
 </style>
