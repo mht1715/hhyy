@@ -2,6 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    secret_key: str = "SECRET_KEY"
     # 数据库配置
     postgres_server: str = "localhost"
     postgres_user: str = "agent_user"
