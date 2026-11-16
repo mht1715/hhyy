@@ -3,10 +3,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from uuid import UUID
 
+from app.api.deps import AdminOrDoctor
 from app.core.database import get_db
 from app.models.product import Product
 from app.schemas.product import ProductCreate, ProductUpdate, ProductResponse
-from app.schemas.response import ResponseModel  # 引入统一响应
+from app.schemas.response import ResponseModel
 from app.api.auth import get_current_user
 from app.models.user import User, UserRole
 
@@ -22,18 +23,15 @@ def require_roles(allowed_roles: list[UserRole]):
     return checker
 
 
-authorized_user = Depends(require_roles([UserRole.ADMIN, UserRole.DOCTOR]))
-
-
 @router.get("/", response_model=ResponseModel[list[ProductResponse]])
-async def get_products(db: AsyncSession = Depends(get_db), current_user: User = authorized_user):
+async def get_products(db: AsyncSession = Depends(get_db), current_user: User = AdminOrDoctor):
     result = await db.execute(select(Product).order_by(Product.created_at.desc()))
     return ResponseModel(data=result.scalars().all())
 
 
 @router.post("/", response_model=ResponseModel[ProductResponse])
 async def create_product(product_in: ProductCreate, db: AsyncSession = Depends(get_db),
-                         current_user: User = authorized_user):
+                         current_user: User = AdminOrDoctor):
     new_product = Product(**product_in.model_dump())
     db.add(new_product)
     await db.commit()
@@ -43,7 +41,7 @@ async def create_product(product_in: ProductCreate, db: AsyncSession = Depends(g
 
 @router.put("/{product_id}", response_model=ResponseModel[ProductResponse])
 async def update_product(product_id: UUID, product_in: ProductUpdate, db: AsyncSession = Depends(get_db),
-                         current_user: User = authorized_user):
+                         current_user: User = AdminOrDoctor):
     result = await db.execute(select(Product).where(Product.id == product_id))
     product = result.scalar_one_or_none()
     if not product:
@@ -59,7 +57,7 @@ async def update_product(product_id: UUID, product_in: ProductUpdate, db: AsyncS
 
 
 @router.delete("/{product_id}", response_model=ResponseModel[dict])
-async def delete_product(product_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = authorized_user):
+async def delete_product(product_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = AdminOrDoctor):
     result = await db.execute(select(Product).where(Product.id == product_id))
     product = result.scalar_one_or_none()
     if not product:

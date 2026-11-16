@@ -126,10 +126,13 @@ onMounted(loadProducts)
       <div class="header-actions">
         <van-button icon="arrow-left" plain size="small" @click="router.back()">返回</van-button>
         <div class="title">药品库管理</div>
-        <van-button type="danger" size="small" icon="plus" round @click="openCreate">录入</van-button>
+        <van-button v-permission="['admin', 'doctor']" type="danger" size="small" icon="plus" round @click="openCreate">
+          录入
+        </van-button>
       </div>
       <!-- 绑定全局输入文本 -->
-      <AgentInput v-model="sharedAgentText" :is-parsing="isParsing" @parse="handlePageAgentParse"/>
+      <AgentInput v-permission="['admin', 'doctor']" v-model="sharedAgentText" :is-parsing="isParsing"
+                  @parse="handlePageAgentParse"/>
     </div>
 
     <van-tabs v-model:active="activeCategory" sticky offset-top="64" color="#ef4444" title-active-color="#ef4444"

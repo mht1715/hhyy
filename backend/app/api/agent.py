@@ -3,7 +3,10 @@ from pydantic import BaseModel
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
+
+from app.api.deps import AdminOrDoctor
 from app.core.config import settings
+from app.models import User
 from app.schemas.agent_parse import AgentProductParse
 from app.schemas.response import ResponseModel
 import os
@@ -16,7 +19,7 @@ class ParseRequest(BaseModel):
 
 
 @router.post("/parse-product", response_model=ResponseModel[dict])
-async def parse_product(req: ParseRequest):
+async def parse_product(req: ParseRequest, current_user: User = AdminOrDoctor):
     api_key = settings.deepseek_api_key or os.getenv("DEEPSEEK_API_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="未配置 DEEPSEEK_API_KEY")

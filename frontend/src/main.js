@@ -10,8 +10,10 @@ import 'vant/lib/index.css'
 
 // 引入虚拟模块进行注册
 import {registerSW} from 'virtual:pwa-register'
+import {permission} from "./directives/permission.js";
 
 const app = createApp(App)
+app.directive('permission', permission)
 app.use(createPinia())
 app.use(router)
 app.use(Vant)

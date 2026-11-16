@@ -6,10 +6,18 @@ export const useAuthStore = defineStore('auth', {
         token: localStorage.getItem('token') || '',
         username: localStorage.getItem('username') || '',
         role: localStorage.getItem('role') || '',
-        isLoginModalOpen: false // 新增：控制登录弹窗显隐
+        isLoginModalOpen: false
     }),
     getters: {
-        isLoggedIn: (state) => !!state.token
+        isLoggedIn: (state) => !!state.token,
+        isAdmin: (state) => state.role === 'admin',
+        isDoctor: (state) => state.role === 'doctor',
+        isPatient: (state) => state.role === 'patient',
+        // 判断是否具备指定角色中的一个
+        hasRole: (state) => (roles) => {
+            if (!Array.isArray(roles)) return state.role === roles
+            return roles.includes(state.role)
+        }
     },
     actions: {
         async login(username, password = '123456') {
