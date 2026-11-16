@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # ── 数据库：带 pgvector 扩展的 PostgreSQL ──
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: agent_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-agent_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent_password}
+      POSTGRES_DB: ${POSTGRES_DB:-agent_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agent_user} -d ${POSTGRES_DB:-agent_db}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── 缓存与状态：Redis ──
+  redis:
+    image: redis:7-alpine
+    container_name: agent_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── 后端应用：FastAPI ──
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: agent_backend
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app  # 挂载代码，支持开发时热更新
+    environment:
+      - POSTGRES_SERVER=db
+      - POSTGRES_USER=${POSTGRES_USER:-agent_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-agent_password}
+      - POSTGRES_DB=${POSTGRES_DB:-agent_db}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # 启动命令（如果是开发环境，可以带 --reload 热更新）
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  pgdata:
+  redisdata:
