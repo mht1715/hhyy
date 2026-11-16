@@ -1,14 +1,14 @@
 <script setup>
-import {ref, onMounted} from 'vue'
+import {ref, onMounted, computed} from 'vue'
 import {useRouter} from 'vue-router'
 import Navbar from '../components/Navbar.vue'
-import {Plus, Edit, Trash2, ArrowLeft} from 'lucide-vue-next'
-import request from '../utils/request'
+import {showToast, showConfirmDialog} from 'vant'
 import {getProductsApi, createProductApi, updateProductApi, deleteProductApi} from '../api/product'
+import {parseProductApi} from '../api/agent'
 
-// 引入封装好的组件
 import AgentInput from '../components/common/AgentInput.vue'
 import ProductFormModal from '../components/product/ProductFormModal.vue'
+import ProductCard from '../components/product/ProductCard.vue'
 
 const router = useRouter()
 const products = ref([])
@@ -19,11 +19,29 @@ const isEdit = ref(false)
 const currentFormData = ref({})
 const isParsing = ref(false)
 
-// 默认空表单，供手动新增使用
+// 全局共用的 AI 输入文本
+const sharedAgentText = ref(`帮我录个板蓝根颗粒，袋装的，卖25块，原价30，库存还有800件。
+这药属于呼吸系统用药，是颗粒剂，规格是10克×20小袋，能放24个月。
+功能主治是清热解毒、凉血利咽，用来治咽喉肿痛、口干咽燥，还有急性扁桃体炎。
+成份是板蓝根，辅料有蔗糖和糊精。吃法是开水冲服，一次5到10克，一天3到4次。
+禁忌和不良反应都没啥，写尚不明确就行。批号是国药准字Z45020920。
+厂家是广西壮族自治区花红药业集团股份公司。`)
+
+const activeCategory = ref('全部')
+const categories = [
+  '全部', '妇科用药', '骨骼肌肉系统用药', '呼吸系统用药',
+  '消化系统用药', '儿科用药', '皮肤科用药', '大健康产品'
+]
+
+const filteredProducts = computed(() => {
+  if (activeCategory.value === '全部') return products.value
+  return products.value.filter(item => item.category === activeCategory.value)
+})
+
 const defaultForm = {
   name: '', generic_name: '', image_url: '',
   price: 0, original_price: 0, stock: 0,
-  spec: '', category: '大健康药品', dosage_form: '', shelf_life: '',
+  spec: '', category: '大健康产品', dosage_form: '', shelf_life: '',
   indications: '', contraindications: '', precautions: '', adverse_reactions: '',
   approval_number: '', manufacturer: ''
 }
@@ -33,7 +51,7 @@ const loadProducts = async () => {
   try {
     products.value = await getProductsApi()
   } catch (e) {
-    alert(e.message)
+    showToast({type: 'fail', message: e.message})
   } finally {
     loading.value = false
   }
@@ -51,26 +69,37 @@ const openEdit = (row) => {
   isModalOpen.value = true
 }
 
-// 首页面的 Agent 解析
 const handlePageAgentParse = async (text) => {
   isParsing.value = true
   try {
-    const parsedData = await request.post('/agent/parse-product', {text})
-    if (parsedData.error) {
-      alert(parsedData.error)
-      return
-    }
+    // 拦截器已经剥壳，parsedData 直接就是数据字典
+    const parsedData = await parseProductApi(text)
+
     isEdit.value = false
     currentFormData.value = {...defaultForm, ...parsedData}
+    localStorage.removeItem('hhyy_product_draft')
     isModalOpen.value = true
+    showToast({type: 'success', message: '解析成功，请核对表单'})
   } catch (e) {
-    alert('解析失败：' + e.message)
+    // 异常已经被拦截器 Toast 过了，这里静默处理即可
+    console.error(e)
   } finally {
     isParsing.value = false
   }
 }
 
-// 保存表单
+const handleDelete = async (id) => {
+  try {
+    await showConfirmDialog({title: '确认删除', message: '此操作不可恢复'})
+    await deleteProductApi(id)
+    showToast({type: 'success', message: '删除成功'})
+    await loadProducts()
+  } catch (e) {
+    // showConfirmDialog 取消抛出的是 'cancel'，拦截器不会处理这个
+    if (e !== 'cancel') console.error(e)
+  }
+}
+
 const handleSave = async (formData) => {
   try {
     if (isEdit.value) {
@@ -79,19 +108,10 @@ const handleSave = async (formData) => {
       await createProductApi(formData)
     }
     isModalOpen.value = false
+    showToast({type: 'success', message: '保存成功'})
     await loadProducts()
   } catch (e) {
-    alert(e.message)
-  }
-}
-
-const handleDelete = async (id) => {
-  if (!confirm('确认删除该药品吗？')) return
-  try {
-    await deleteProductApi(id)
-    await loadProducts()
-  } catch (e) {
-    alert(e.message)
+    showToast({type: 'fail', message: e.message})
   }
 }
 
@@ -101,78 +121,38 @@ onMounted(loadProducts)
 <template>
   <div class="product-page">
     <Navbar/>
-    <div class="container">
+
+    <div class="header-container">
       <div class="header-actions">
-        <div class="left">
-          <button class="back-btn" @click="router.back()">
-            <ArrowLeft :size="18"/>
-            返回
-          </button>
-          <h2>药品库管理</h2>
-        </div>
-        <button class="add-btn" @click="openCreate">
-          <Plus :size="18"/>
-          手动录入
-        </button>
+        <van-button icon="arrow-left" plain size="small" @click="router.back()">返回</van-button>
+        <div class="title">药品库管理</div>
+        <van-button type="danger" size="small" icon="plus" round @click="openCreate">录入</van-button>
       </div>
+      <!-- 绑定全局输入文本 -->
+      <AgentInput v-model="sharedAgentText" :is-parsing="isParsing" @parse="handlePageAgentParse"/>
+    </div>
 
-      <!-- 页面级 Agent 输入框 -->
-      <AgentInput :is-parsing="isParsing" @parse="handlePageAgentParse"/>
+    <van-tabs v-model:active="activeCategory" sticky offset-top="64" color="#ef4444" title-active-color="#ef4444"
+              line-width="20px">
+      <van-tab v-for="cat in categories" :key="cat" :title="cat" :name="cat"/>
+    </van-tabs>
 
-      <div class="table-wrapper">
-        <table class="data-table" v-if="!loading">
-          <thead>
-          <tr>
-            <th width="80">商品图</th>
-            <th>药品信息</th>
-            <th>分类 / 规格</th>
-            <th>价格</th>
-            <th>库存</th>
-            <th width="140">操作</th>
-          </tr>
-          </thead>
-          <tbody>
-          <tr v-if="products.length === 0">
-            <td colspan="6" style="text-align: center; color: #999; padding: 40px;">暂无药品数据，请录入或运行预置脚本
-            </td>
-          </tr>
-          <tr v-for="item in products" :key="item.id">
-            <td>
-              <img
-                  :src="item.image_url || ''"
-                  class="prod-img" alt="图片"/>
-            </td>
-            <td>
-              <div class="prod-name">{{ item.name }}</div>
-              <div class="prod-generic">通用名：{{ item.generic_name }}</div>
-            </td>
-            <td>
-              <div class="tag">{{ item.category }}</div>
-              <div class="tag">{{ item.dosage_form }} / {{ item.spec }}</div>
-            </td>
-            <td>
-              <div class="price">¥{{ item.price }}</div>
-            </td>
-            <td>{{ item.stock }}</td>
-            <td>
-              <button class="icon-btn edit" @click="openEdit(item)">
-                <Edit :size="16"/>
-                编辑
-              </button>
-              <button class="icon-btn delete" @click="handleDelete(item.id)">
-                <Trash2 :size="16"/>
-                删除
-              </button>
-            </td>
-          </tr>
-          </tbody>
-        </table>
-        <div v-else style="padding: 20px; text-align: center;">加载中...</div>
+    <div class="product-list-container">
+      <van-empty v-if="!loading && filteredProducts.length === 0" description="该分类下暂无药品"/>
+      <div class="grid-layout">
+        <ProductCard
+            v-for="item in filteredProducts"
+            :key="item.id"
+            :item="item"
+            @edit="openEdit"
+            @delete="handleDelete"
+        />
       </div>
     </div>
 
-    <!-- 引入弹窗组件 -->
+    <!-- 传入 v-model:agent-text -->
     <ProductFormModal
+        v-model:agent-text="sharedAgentText"
         :is-open="isModalOpen"
         :is-edit="isEdit"
         :initial-data="currentFormData"
@@ -185,147 +165,53 @@ onMounted(loadProducts)
 <style scoped lang="scss">
 .product-page {
   min-height: 100vh;
-  background-color: #f3f4f6;
+  background-color: #f7f8fa;
   padding-top: 64px;
+  padding-bottom: 24px;
 
-  .container {
+  .header-container {
+    padding: 16px;
+    background: #fff;
+    margin-bottom: 8px;
+  }
+
+  .header-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    max-width: 1200px;
+    margin: 0 auto 16px;
+
+    .title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #323233;
+    }
+  }
+
+  .product-list-container {
     max-width: 1200px;
     margin: 0 auto;
-    padding: 24px;
+    padding: 16px;
 
-    .header-actions {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 20px;
+    .grid-layout {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
 
-      .left {
-        display: flex;
-        align-items: center;
+    @media (min-width: 768px) {
+      .grid-layout {
+        grid-template-columns: repeat(3, 1fr);
         gap: 16px;
-
-        h2 {
-          color: #111827;
-          font-size: 20px;
-        }
-
-        .back-btn {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          background: white;
-          border: 1px solid #e5e7eb;
-          padding: 8px 12px;
-          border-radius: 6px;
-          cursor: pointer;
-          color: #4b5563;
-        }
-      }
-
-      .add-btn {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        background: #ef4444;
-        color: white;
-        border: none;
-        padding: 10px 16px;
-        border-radius: 6px;
-        cursor: pointer;
-        font-weight: 600;
       }
     }
 
-    .table-wrapper {
-      background: white;
-      border-radius: 12px;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-      overflow-y: auto;
-      max-height: 500px;
-      margin-top: 24px;
-
-      .data-table {
-        width: 100%;
-        border-collapse: separate;
-        border-spacing: 0;
-        min-width: 800px;
-
-        th, td {
-          padding: 16px;
-          text-align: left;
-          border-bottom: 1px solid #f3f4f6;
-        }
-
-        th {
-          background: #f9fafb;
-          color: #6b7280;
-          font-weight: 500;
-          position: sticky;
-          top: 0;
-          z-index: 10;
-          box-shadow: 0 1px 0 #e5e7eb;
-        }
-
-        .prod-img {
-          width: 60px;
-          height: 60px;
-          object-fit: cover;
-          border-radius: 6px;
-          border: 1px solid #e5e7eb;
-        }
-
-        .prod-name {
-          font-weight: 600;
-          color: #111827;
-          font-size: 15px;
-          margin-bottom: 4px;
-        }
-
-        .prod-generic {
-          font-size: 13px;
-          color: #6b7280;
-        }
-
-        .tag {
-          display: inline-block;
-          background: #f3f4f6;
-          border: 1px solid #e5e7eb;
-          font-size: 12px;
-          padding: 2px 8px;
-          border-radius: 4px;
-          color: #4b5563;
-          margin-right: 4px;
-          margin-bottom: 4px;
-        }
-
-        .price {
-          font-size: 16px;
-          font-weight: bold;
-          color: #ef4444;
-        }
-
-        .icon-btn {
-          background: transparent;
-          border: none;
-          cursor: pointer;
-          padding: 6px;
-          margin: 0 6px 0 0;
-          border-radius: 4px;
-          display: inline-flex;
-          align-items: center;
-          gap: 4px;
-
-          &.edit {
-            color: #3b82f6;
-            background: #eff6ff;
-            font-size: 13px;
-          }
-
-          &.delete {
-            color: #ef4444;
-            background: #fef2f2;
-          }
-        }
+    @media (min-width: 1024px) {
+      .grid-layout {
+        grid-template-columns: repeat(4, 1fr);
+        gap: 24px;
       }
     }
   }

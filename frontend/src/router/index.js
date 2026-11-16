@@ -23,6 +23,18 @@ const routes = [
         name: 'Patient',
         component: () => import('../views/PatientView.vue'),
         meta: {requiresAuth: true, role: 'patient'}
+    },
+    {
+        path: '/products',
+        name: 'Products',
+        component: () => import('../views/ProductView.vue'),
+        meta: {requiresAuth: true, roles: ['admin', 'doctor']} // 允许的多个角色
+    },
+    {
+        path: '/product/:id',
+        name: 'ProductDetail',
+        component: () => import('../views/ProductDetailView.vue'),
+        meta: {requiresAuth: true, roles: ['admin', 'doctor']}
     }
 ]
 
@@ -36,13 +48,12 @@ router.beforeEach((to, from, next) => {
     const token = localStorage.getItem('token')
     const role = localStorage.getItem('role')
 
-    // 如果需要登录，但没登录 -> 回首页（首页内置了登录弹窗）
     if (to.meta.requiresAuth && !token) {
         return next('/')
     }
 
-    // 如果已登录，且访问的角色路由与当前角色不符 -> 重定向到其所属路由
-    if (to.meta.role && to.meta.role !== role) {
+    // 支持数组形式的角色校验
+    if (to.meta.roles && !to.meta.roles.includes(role)) {
         if (role === 'admin') return next('/admin')
         if (role === 'doctor') return next('/doctor')
         if (role === 'patient') return next('/patient')
