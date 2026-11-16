@@ -1,6 +1,8 @@
 <script setup>
+import {useRouter} from 'vue-router'
 import {Users, ShoppingCart, MessageSquare, TrendingUp, Settings, Database} from 'lucide-vue-next'
 
+const router = useRouter()
 // 模拟数据看板
 const stats = [
   {title: '总注册用户', value: '1,284', icon: Users, color: '#3b82f6', bg: '#eff6ff'},
@@ -70,9 +72,9 @@ const recentOrders = [
           <h3>快捷操作</h3>
         </div>
         <div class="action-list">
-          <button class="action-btn">
+          <button class="action-btn" @click="router.push('/products')">
             <Database :size="18"/>
-            管理药品库存与知识库
+            药品管理
           </button>
           <button class="action-btn">
             <Settings :size="18"/>

@@ -1,25 +1,27 @@
 <script setup>
-import {ref, watch} from 'vue'
-import {Sparkles, Loader2} from 'lucide-vue-next'
+import {computed, ref} from 'vue'
+import {Sparkles, ChevronDown, ChevronUp} from 'lucide-vue-next'
 
 const props = defineProps({
-  isParsing: {type: Boolean, default: false},
-  initialText: {type: String, default: ''}
+  modelValue: {type: String, default: ''},
+  isParsing: {type: Boolean, default: false}
 })
-const emit = defineEmits(['parse'])
+const emit = defineEmits(['update:modelValue', 'parse'])
 
-// 默认提供一个极佳的测试用例
-const text = ref(props.initialText || `帮我录个板蓝根颗粒，袋装的，卖25块，原价30，库存还有800件。
-这药属于呼吸系统用药，是颗粒剂，规格是10克×20小袋，能放24个月。
-功能主治是清热解毒、凉血利咽，用来治咽喉肿痛、口干咽燥，还有急性扁桃体炎。
-成份是板蓝根，辅料有蔗糖和糊精。吃法是开水冲服，一次5到10克，一天3到4次。
-禁忌和不良反应都没啥，写尚不明确就行。批号是国药准字Z45020920。
-厂家是广西壮族自治区花红药业集团股份公司。`)
-watch(() => props.initialText, (val) => {
-  if (val) text.value = val
+const isExpanded = ref(false)
+
+const text = computed({
+  get: () => props.modelValue,
+  set: (val) => emit('update:modelValue', val)
 })
+
+const toggleExpand = () => {
+  if (props.isParsing) return
+  isExpanded.value = !isExpanded.value
+}
 
 const handleParse = () => {
+  if (props.isParsing) return
   if (!text.value.trim()) return
   emit('parse', text.value)
 }
@@ -27,24 +29,45 @@ const handleParse = () => {
 
 <template>
   <div class="agent-input-card">
-    <div class="agent-header">
-      <Sparkles :size="18" color="#ef4444"/>
-      <span>AI 智能录入助手</span>
+    <div class="agent-header" @click="toggleExpand">
+      <div class="title-left">
+        <Sparkles :size="18" color="#ef4444"/>
+        <span>AI 智能录入助手</span>
+      </div>
+      <div class="toggle-icon">
+        <ChevronUp v-if="isExpanded" :size="20" color="#b91c1c"/>
+        <ChevronDown v-else :size="20" color="#b91c1c"/>
+      </div>
     </div>
-    <div class="agent-input-row">
-      <textarea
-          v-model="text"
-          rows="6"
-          placeholder="请用自然语言描述药品信息，例如：录入花红片，妇科用药，价格25元，库存500..."
-          :disabled="isParsing"
-          @keydown.enter.prevent="handleParse"
-      ></textarea>
-      <button class="parse-btn" @click="handleParse" :disabled="isParsing">
-        <Loader2 v-if="isParsing" :size="18" class="spin"/>
-        <span v-else>解析并填表</span>
-      </button>
+
+    <div class="expand-wrapper" :class="{ 'is-expanded': isExpanded }">
+      <div class="expand-content">
+        <div class="agent-body">
+          <van-field
+              v-model="text"
+              type="textarea"
+              rows="3"
+              autosize
+              :disabled="isParsing"
+              placeholder="请用自然语言描述药品信息..."
+              class="custom-textarea"
+          />
+
+          <div class="agent-footer">
+            <p class="tips">支持提取名称、分类、价格、说明书等。</p>
+            <van-button
+                type="danger"
+                class="parse-btn"
+                :loading="isParsing"
+                loading-text="智能解析中..."
+                @click="handleParse"
+            >
+              一键解析填表
+            </van-button>
+          </div>
+        </div>
+      </div>
     </div>
-    <p class="tips">支持自然语言一键提取药品名称、分类、价格、库存、说明书等信息。</p>
   </div>
 </template>
 
@@ -52,75 +75,113 @@ const handleParse = () => {
 .agent-input-card {
   background: linear-gradient(to right, #fff, #fef2f2);
   border-radius: 12px;
-  padding: 16px;
+  padding: 12px 16px;
   border: 1px solid #fca5a5;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
 
   .agent-header {
     display: flex;
+    justify-content: space-between;
     align-items: center;
-    gap: 8px;
-    font-weight: 600;
-    color: #b91c1c;
-    margin-bottom: 12px;
-    font-size: 15px;
+    cursor: pointer;
+    padding: 4px 0;
+
+    .title-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      color: #b91c1c;
+      font-size: 15px;
+    }
+
+    .toggle-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px;
+      border-radius: 50%;
+      background: rgba(239, 68, 68, 0.1);
+    }
   }
 
-  .agent-input-row {
+  .expand-wrapper {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.3s ease-in-out;
+
+    &.is-expanded {
+      grid-template-rows: 1fr;
+    }
+
+    .expand-content {
+      overflow: hidden;
+    }
+  }
+
+  .agent-body {
     display: flex;
+    flex-direction: column;
     gap: 12px;
-    align-items: stretch;
+    padding-top: 12px;
+  }
 
-    textarea {
-      flex: 1;
-      padding: 12px;
-      border: 1px solid #d1d5db;
-      border-radius: 8px;
-      outline: none;
-      font-size: 14px;
+  :deep(.custom-textarea) {
+    background: #ffffff;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    padding: 12px;
+    transition: border-color 0.2s;
+
+    &:focus-within {
+      border-color: #ef4444;
+      box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+    }
+
+    &.van-field--disabled {
+      background: #f3f4f6;
+    }
+
+    .van-field__control {
       font-family: inherit;
-      resize: vertical;
-      min-height: 80px;
+      font-size: 14px;
+      line-height: 1.6;
+      color: #374151;
+    }
+  }
 
-      &:focus {
-        border-color: #ef4444;
-        box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
-      }
+  .agent-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+
+    .tips {
+      font-size: 12px;
+      color: #9ca3af;
+      flex: 1;
     }
 
     .parse-btn {
-      background: #ef4444;
-      color: white;
-      border: none;
-      padding: 0 24px;
+      min-width: 120px;
       border-radius: 8px;
       font-weight: 600;
-      cursor: pointer;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      gap: 6px;
-      white-space: nowrap;
-
-      &:disabled {
-        background: #fca5a5;
-        cursor: not-allowed;
-      }
     }
   }
 
-  .tips {
-    margin-top: 8px;
-    font-size: 12px;
-    color: #9ca3af;
-  }
-
   @media (max-width: 768px) {
-    .agent-input-row {
+    .agent-footer {
       flex-direction: column;
+      align-items: stretch;
+
+      .tips {
+        text-align: center;
+        margin-bottom: 8px;
+      }
 
       .parse-btn {
-        padding: 12px;
+        width: 100%;
       }
     }
   }

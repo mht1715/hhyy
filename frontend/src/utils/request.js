@@ -1,11 +1,12 @@
 import axios from 'axios'
+import {showToast} from 'vant'
 
 const request = axios.create({
     baseURL: '/api',
-    timeout: 15000
+    timeout: 30000 // AI 解析可能较慢，超时时间设长点
 })
 
-// 请求拦截器：自动注入 Token
+// 请求拦截器
 request.interceptors.request.use(
     (config) => {
         const token = localStorage.getItem('token')
@@ -17,20 +18,31 @@ request.interceptors.request.use(
     (error) => Promise.reject(error)
 )
 
-// 响应拦截器：统一处理错误
+// 响应拦截器
 request.interceptors.response.use(
-    (response) => response.data,
-    (error) => {
-        if (error.response) {
-            const {status, data} = error.response
-            if (status === 401) {
-                // Token 过期，清除缓存并跳转登录
-                localStorage.clear()
-                window.location.href = '/login'
-            }
-            return Promise.reject(new Error(data.detail || '请求失败'))
+    (response) => {
+        const res = response.data
+        // 如果后端返回了 code 且不是 200，说明业务报错
+        if (res.code && res.code !== 200) {
+            showToast({type: 'fail', message: res.message || '请求失败'})
+            return Promise.reject(new Error(res.message || 'Error'))
         }
-        return Promise.reject(error)
+        // 直接把最核心的 data 剥出来给业务层
+        return res.data !== undefined ? res.data : res
+    },
+    (error) => {
+        // HTTP 层报错（如 401, 404, 500）
+        const msg = error.response?.data?.detail || error.response?.data?.message || '网络异常，请稍后再试'
+        showToast({type: 'fail', message: msg})
+
+        if (error.response?.status === 401) {
+            localStorage.clear()
+            // 延迟跳转，让 toast 显示完
+            setTimeout(() => {
+                window.location.href = '/'
+            }, 1500)
+        }
+        return Promise.reject(new Error(msg))
     }
 )
 

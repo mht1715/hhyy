@@ -1,16 +1,19 @@
 <script setup>
 import {ref, watch} from 'vue'
-import {X} from 'lucide-vue-next'
+import {showToast, showConfirmDialog} from 'vant'
+import {parseProductApi} from '../../api/agent'
+import {uploadImageApi} from '../../api/upload'
 import AgentInput from '../common/AgentInput.vue'
-import NumberInput from '../common/NumberInput.vue'
-import request from '../../utils/request'
 
 const props = defineProps({
   isOpen: {type: Boolean, default: false},
   isEdit: {type: Boolean, default: false},
-  initialData: {type: Object, default: () => ({})}
+  initialData: {type: Object, default: () => ({})},
+  agentText: {type: String, default: ''} // 接收父组件文本
 })
-const emit = defineEmits(['close', 'save'])
+const emit = defineEmits(['close', 'save', 'update:agentText'])
+
+const DRAFT_KEY = 'hhyy_product_draft'
 
 const categoryOptions = [
   '妇科用药', '骨骼肌肉系统用药', '呼吸系统用药',
@@ -19,342 +22,238 @@ const categoryOptions = [
 
 const form = ref({})
 const isParsing = ref(false)
+const showCategoryPicker = ref(false)
+const fileList = ref([])
 
-watch(() => props.isOpen, (val) => {
+watch(() => props.isOpen, async (val) => {
   if (val) {
-    form.value = {...props.initialData}
+    const draftStr = localStorage.getItem(DRAFT_KEY)
+    let useDraft = false
+
+    if (draftStr) {
+      try {
+        const draft = JSON.parse(draftStr)
+        if ((!props.isEdit && !draft.id) || (props.isEdit && draft.id === props.initialData.id)) {
+          await showConfirmDialog({
+            title: '发现未保存的草稿',
+            message: '您上次填写的内容尚未保存，是否继续编辑？',
+            confirmButtonText: '恢复草稿',
+            cancelButtonText: '重新填写',
+          }).then(() => {
+            form.value = draft.data
+            useDraft = true
+            showToast('已恢复草稿')
+          }).catch(() => {
+            localStorage.removeItem(DRAFT_KEY)
+          })
+        }
+      } catch (e) {
+        console.error('解析草稿失败', e)
+      }
+    }
+
+    if (!useDraft) {
+      form.value = {...props.initialData}
+    }
+
+    if (form.value.image_url) {
+      fileList.value = [{url: form.value.image_url}]
+    } else {
+      fileList.value = []
+    }
   }
 })
 
-// 弹窗内的 Agent 解析
+watch(form, (newVal) => {
+  if (!props.isOpen) return
+  localStorage.setItem(DRAFT_KEY, JSON.stringify({
+    id: props.isEdit ? props.initialData.id : null,
+    data: newVal
+  }))
+}, {deep: true})
+
+// 图片真实上传逻辑
+const afterRead = async (file) => {
+  file.status = 'uploading'
+  file.message = '上传中...'
+  try {
+    const res = await uploadImageApi(file.file)
+    file.status = 'done'
+    file.message = ''
+    form.value.image_url = res.url
+    showToast({type: 'success', message: '图片上传成功'})
+  } catch (error) {
+    file.status = 'failed'
+    file.message = '上传失败'
+    showToast('图片上传失败')
+  }
+}
+
+const onConfirmCategory = ({selectedOptions}) => {
+  form.value.category = selectedOptions[0].text
+  showCategoryPicker.value = false
+}
+
+// 弹窗内解析：覆盖旧数据
 const handleAgentParse = async (text) => {
   isParsing.value = true
   try {
-    const parsedData = await request.post('/agent/parse-product', {text})
-    if (parsedData.error) {
-      alert(parsedData.error)
-      return
+    const parsedData = await parseProductApi(text)
+
+    const currentId = props.isEdit ? props.initialData.id : null
+    form.value = {...parsedData, ...(currentId ? {id: currentId} : {})}
+
+    if (parsedData.image_url) {
+      fileList.value = [{url: parsedData.image_url}]
+    } else {
+      fileList.value = []
     }
-    // 增量合并到当前表单，未提及的字段保留原样
-    form.value = {...form.value, ...parsedData}
+    showToast({type: 'success', message: '解析成功，已覆盖表单'})
   } catch (e) {
-    alert('解析失败：' + e.message)
+    console.error(e)
   } finally {
     isParsing.value = false
   }
 }
 
 const submit = () => {
-  if (!form.value.name) return alert('请填写商品名称')
+  if (!form.value.name) return showToast('请填写商品名称')
   emit('save', form.value)
+  localStorage.removeItem(DRAFT_KEY)
 }
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="isOpen" class="modal-overlay" @click.self="emit('close')">
-      <div class="modal-content large-modal">
-        <div class="modal-header">
-          <h3>{{ isEdit ? '编辑药品信息' : '录入新药品' }}</h3>
-          <button class="close-btn" @click="emit('close')">
-            <X :size="24"/>
-          </button>
+  <teleport to="body">
+    <van-popup
+        :show="isOpen"
+        position="bottom"
+        round
+        closeable
+        :style="{ height: '90%' }"
+        @update:show="val => !val && emit('close')"
+    >
+      <div class="form-modal-content">
+        <div class="modal-title">{{ isEdit ? '编辑药品信息' : '录入新药品' }}</div>
+
+        <div class="agent-section">
+          <!-- 同步文本 -->
+          <AgentInput
+              :model-value="agentText"
+              @update:model-value="val => emit('update:agentText', val)"
+              :is-parsing="isParsing"
+              @parse="handleAgentParse"
+          />
         </div>
 
-        <!-- 顶部固定 AI 助手 -->
-        <div class="modal-agent-top">
-          <AgentInput :is-parsing="isParsing" @parse="handleAgentParse"/>
+        <div class="scrollable-form">
+          <van-form @submit="submit">
+            <van-cell-group inset title="基础信息">
+              <van-field v-model="form.name" label="商品名称" placeholder="例如：花红消肿止痛酊" required/>
+              <van-field v-model="form.generic_name" label="通用名" placeholder="例如：消肿止痛酊"/>
+
+              <van-field name="uploader" label="商品主图">
+                <template #input>
+                  <van-uploader v-model="fileList" :max-count="1" :after-read="afterRead"/>
+                </template>
+              </van-field>
+
+              <van-field name="stepper" label="价格(元)" required>
+                <template #input>
+                  <van-stepper v-model="form.price" step="0.1" min="0" input-width="80px"/>
+                </template>
+              </van-field>
+              <van-field name="stepper" label="原价(元)">
+                <template #input>
+                  <van-stepper v-model="form.original_price" step="0.1" min="0" input-width="80px"/>
+                </template>
+              </van-field>
+              <van-field name="stepper" label="库存" required>
+                <template #input>
+                  <van-stepper v-model="form.stock" step="10" min="0" input-width="80px"/>
+                </template>
+              </van-field>
+            </van-cell-group>
+
+            <van-cell-group inset title="规格与分类">
+              <van-field v-model="form.category" is-link readonly label="分类" placeholder="请选择分类"
+                         @click="showCategoryPicker = true"/>
+              <van-field v-model="form.dosage_form" label="剂型" placeholder="如：酊剂 / 片剂"/>
+              <van-field v-model="form.spec" label="规格" placeholder="如：45ml"/>
+              <van-field v-model="form.shelf_life" label="有效期" placeholder="如：36个月"/>
+            </van-cell-group>
+
+            <van-cell-group inset title="说明书属性">
+              <van-field v-model="form.indications" rows="2" autosize label="功能主治" type="textarea"
+                         placeholder="请填写适应症..."/>
+              <van-field v-model="form.contraindications" rows="2" autosize label="禁忌" type="textarea"
+                         placeholder="如：孕妇禁用。"/>
+              <van-field v-model="form.precautions" rows="2" autosize label="注意事项" type="textarea"
+                         placeholder="请填写注意事项..."/>
+              <van-field v-model="form.adverse_reactions" rows="2" autosize label="不良反应" type="textarea"
+                         placeholder="如：尚不明确。"/>
+            </van-cell-group>
+
+            <van-cell-group inset title="生产信息">
+              <van-field v-model="form.approval_number" label="批准文号" placeholder="如：国药准字..."/>
+              <van-field v-model="form.manufacturer" label="生产企业" placeholder="如：广西壮族自治区花红药业..."/>
+            </van-cell-group>
+
+            <div class="submit-btn-wrap">
+              <van-button round block type="danger" native-type="submit">
+                保存入库
+              </van-button>
+            </div>
+          </van-form>
         </div>
 
-        <!-- 滚动表单区 -->
-        <div class="form-body scrollable-form">
-          <div class="form-section">
-            <h4>基础信息</h4>
-            <div class="form-row">
-              <div class="form-group flex-2">
-                <label>商品名称 <span class="required">*</span></label>
-                <input v-model="form.name" type="text" placeholder="例如：花红消肿止痛酊"/>
-              </div>
-              <div class="form-group flex-1">
-                <label>通用名</label>
-                <input v-model="form.generic_name" type="text" placeholder="例如：消肿止痛酊"/>
-              </div>
-            </div>
-            <div class="form-group">
-              <label>商品主图 URL</label>
-              <input v-model="form.image_url" type="text" placeholder="https://..."/>
-            </div>
-            <div class="form-row">
-              <div class="form-group">
-                <label>价格 (元) <span class="required">*</span></label>
-                <NumberInput v-model="form.price" :step="0.1" min="0" placeholder="如：15.73"/>
-              </div>
-              <div class="form-group">
-                <label>原价 (元)</label>
-                <NumberInput v-model="form.original_price" :step="0.1" min="0" placeholder="如：18.00"/>
-              </div>
-              <div class="form-group">
-                <label>库存 <span class="required">*</span></label>
-                <NumberInput v-model="form.stock" :step="10" min="0" placeholder="如：1000"/>
-              </div>
-            </div>
-          </div>
-
-          <div class="form-section">
-            <h4>规格与分类</h4>
-            <div class="form-row">
-              <div class="form-group">
-                <label>分类</label>
-                <select v-model="form.category">
-                  <option v-for="cat in categoryOptions" :key="cat" :value="cat">{{ cat }}</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>剂型</label>
-                <input v-model="form.dosage_form" type="text" placeholder="如：酊剂 / 片剂"/>
-              </div>
-              <div class="form-group">
-                <label>规格</label>
-                <input v-model="form.spec" type="text" placeholder="如：45ml"/>
-              </div>
-              <div class="form-group">
-                <label>有效期</label>
-                <input v-model="form.shelf_life" type="text" placeholder="如：36个月"/>
-              </div>
-            </div>
-          </div>
-
-          <div class="form-section">
-            <h4>说明书属性</h4>
-            <div class="form-group">
-              <label>适应症/功能主治</label>
-              <textarea v-model="form.indications" rows="2" placeholder="请填写适应症..."></textarea>
-            </div>
-            <div class="form-group">
-              <label>禁忌</label>
-              <textarea v-model="form.contraindications" rows="2" placeholder="如：孕妇禁用。"></textarea>
-            </div>
-            <div class="form-group">
-              <label>注意事项</label>
-              <textarea v-model="form.precautions" rows="2" placeholder="请填写注意事项..."></textarea>
-            </div>
-            <div class="form-group">
-              <label>不良反应</label>
-              <textarea v-model="form.adverse_reactions" rows="2" placeholder="如：尚不明确。"></textarea>
-            </div>
-          </div>
-
-          <div class="form-section">
-            <h4>生产信息</h4>
-            <div class="form-row">
-              <div class="form-group">
-                <label>批准文号</label>
-                <input v-model="form.approval_number" type="text" placeholder="如：国药准字..."/>
-              </div>
-              <div class="form-group flex-2">
-                <label>生产企业</label>
-                <input v-model="form.manufacturer" type="text" placeholder="如：广西壮族自治区花红药业..."/>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="modal-footer">
-          <button class="cancel-btn" @click="emit('close')">取消</button>
-          <button class="save-btn" @click="submit">保存入库</button>
-        </div>
+        <van-popup v-model:show="showCategoryPicker" position="bottom" round teleport="body">
+          <van-picker
+              :columns="categoryOptions.map(c => ({ text: c, value: c }))"
+              @confirm="onConfirmCategory"
+              @cancel="showCategoryPicker = false"
+          />
+        </van-popup>
       </div>
-    </div>
-  </Teleport>
+    </van-popup>
+  </teleport>
 </template>
 
 <style scoped lang="scss">
-/* 弹窗样式 */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+.form-modal-content {
   display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
+  flex-direction: column;
+  height: 100%;
+  background: #f7f8fa;
 
-  .large-modal {
+  .modal-title {
+    padding: 16px;
+    font-size: 16px;
+    font-weight: 600;
+    text-align: center;
     background: white;
-    width: 800px;
-    max-width: 95%;
-    border-radius: 12px;
-    display: flex;
-    flex-direction: column;
-    max-height: 80vh; /* 核心：不超过屏幕 80% */
-    overflow: hidden;
+    flex-shrink: 0;
+  }
 
-    .modal-header {
-      padding: 16px 24px;
-      border-bottom: 1px solid #e5e7eb;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-shrink: 0;
+  .agent-section {
+    padding: 12px 16px 0;
+    flex-shrink: 0;
+  }
 
-      h3 {
-        font-size: 18px;
-        color: #111827;
-      }
+  .scrollable-form {
+    flex: 1;
+    overflow-y: auto;
+    padding-bottom: 24px;
+  }
 
-      .close-btn {
-        background: none;
-        border: none;
-        cursor: pointer;
-        color: #9ca3af;
-
-        &:hover {
-          color: #ef4444;
-        }
-      }
-    }
-
-    .modal-agent-top {
-      padding: 16px 24px 0;
-      flex-shrink: 0;
-    }
-
-    .scrollable-form {
-      padding: 24px;
-      overflow-y: auto;
-      flex: 1;
-
-      .form-section {
-        margin-bottom: 24px;
-        padding-bottom: 20px;
-        border-bottom: 1px dashed #e5e7eb;
-
-        &:last-child {
-          border-bottom: none;
-          margin-bottom: 0;
-        }
-
-        h4 {
-          font-size: 15px;
-          color: #374151;
-          margin-bottom: 16px;
-          font-weight: 600;
-          background: #f3f4f6;
-          padding: 6px 12px;
-          border-radius: 4px;
-          display: inline-block;
-        }
-      }
-
-      .form-group {
-        margin-bottom: 16px;
-
-        label {
-          display: block;
-          font-size: 13px;
-          color: #4b5563;
-          margin-bottom: 6px;
-          font-weight: 500;
-        }
-
-        .required {
-          color: #ef4444;
-        }
-
-        input, select, textarea {
-          width: 100%;
-          padding: 10px;
-          border: 1px solid #d1d5db;
-          border-radius: 6px;
-          outline: none;
-          font-family: inherit;
-          font-size: 14px;
-          background: white;
-
-          &:focus {
-            border-color: #ef4444;
-            box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
-          }
-        }
-      }
-
-      .form-row {
-        display: flex;
-        gap: 16px;
-
-        .flex-1 {
-          flex: 1;
-        }
-
-        .flex-2 {
-          flex: 2;
-        }
-
-        .form-group {
-          flex: 1;
-          margin-bottom: 16px;
-        }
-      }
-    }
-
-    .modal-footer {
-      padding: 16px 24px;
-      border-top: 1px solid #e5e7eb;
-      display: flex;
-      justify-content: flex-end;
-      gap: 12px;
-      flex-shrink: 0;
-      background: #f9fafb;
-
-      button {
-        padding: 10px 24px;
-        border-radius: 6px;
-        font-weight: 600;
-        cursor: pointer;
-        border: none;
-      }
-
-      .cancel-btn {
-        background: white;
-        border: 1px solid #d1d5db;
-        color: #4b5563;
-      }
-
-      .save-btn {
-        background: #ef4444;
-        color: white;
-
-        &:hover {
-          background: #dc2626;
-        }
-      }
-    }
+  .submit-btn-wrap {
+    padding: 16px;
+    margin-top: 10px;
   }
 }
 
-.spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  100% {
-    transform: rotate(360deg);
-  }
-}
-
-@media (max-width: 768px) {
-  .modal-overlay {
-    .large-modal {
-      width: 100% !important;
-      height: 80% !important;
-      max-height: 80% !important;
-      border-radius: 5px !important;
-    }
-
-    .form-row {
-      flex-direction: column;
-      gap: 0;
-    }
-  }
+:deep(.van-cell-group__title) {
+  padding-left: 16px;
+  font-weight: 600;
 }
 </style>
