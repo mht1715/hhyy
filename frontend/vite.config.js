@@ -62,7 +62,13 @@ export default defineConfig({
             '/api': {
                 target: 'http://localhost:8000',
                 changeOrigin: true
+            },
+            // 新增对静态资源的代理
+            '/static': {
+                target: 'http://localhost:8000',
+                changeOrigin: true
             }
         }
+
     }
 })
