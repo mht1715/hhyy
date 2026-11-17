@@ -66,3 +66,16 @@ async def delete_product(product_id: UUID, db: AsyncSession = Depends(get_db), c
     await db.delete(product)
     await db.commit()
     return ResponseModel(data={"message": "删除成功"})
+
+
+@router.get("/{product_id}", response_model=ResponseModel[ProductResponse])
+async def get_product(
+        product_id: UUID,
+        db: AsyncSession = Depends(get_db)
+):
+    # 注意这里没有加 current_user: User = AdminOrDoctor，所以是公开接口
+    result = await db.execute(select(Product).where(Product.id == product_id))
+    product = result.scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail="药品不存在")
+    return ResponseModel(data=product)

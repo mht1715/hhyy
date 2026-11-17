@@ -34,7 +34,16 @@ const routes = [
         path: '/product/:id',
         name: 'ProductDetail',
         component: () => import('../views/ProductDetailView.vue'),
-        meta: {requiresAuth: true, roles: ['admin', 'doctor']}
+    },
+    {
+        path: '/checkout',
+        name: 'Checkout',
+        component: () => import('../views/CheckoutView.vue')
+    },
+    {
+        path: '/service',
+        name: 'Service',
+        component: () => import('../views/ServiceView.vue')
     }
 ]
 
