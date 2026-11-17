@@ -95,7 +95,7 @@ onMounted(loadDetail)
         </div>
 
         <!-- AI 助手直接嵌入页面 -->
-        <DrugAIAssistant :product-name="product.name"/>
+        <DrugAIAssistant :product-id="product.id" :product-name="product.name"/>
 
         <!-- 说明书参数区 -->
         <van-cell-group inset title="药品说明书" class="manual-group">
