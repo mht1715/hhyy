@@ -1,5 +1,6 @@
 import {defineStore} from 'pinia'
 import {loginApi} from '../api/auth'
+import {useCartStore} from './cart'
 
 export const useAuthStore = defineStore('auth', {
     state: () => ({
@@ -29,12 +30,18 @@ export const useAuthStore = defineStore('auth', {
             localStorage.setItem('username', this.username)
             localStorage.setItem('role', this.role)
             this.isLoginModalOpen = false // 登录成功自动关闭弹窗
+            // 登录成功后，立刻拉取购物车
+            const cartStore = useCartStore()
+            await cartStore.fetchCart()
         },
         logout() {
             this.token = ''
             this.username = ''
             this.role = ''
             localStorage.clear()
+            // 退出登录后，清空本地的购物车展示
+            const cartStore = useCartStore()
+            cartStore.$reset()
         }
     }
 })

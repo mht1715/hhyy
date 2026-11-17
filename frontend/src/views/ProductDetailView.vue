@@ -7,13 +7,16 @@ import {showToast, showImagePreview} from 'vant'
 import {ArrowLeft, Headphones} from 'lucide-vue-next'
 import CartFloating from '../components/cart/CartFloating.vue'
 import DrugAIAssistant from '../components/product/DrugAIAssistant.vue'
+import {useAuthStore} from '../store/auth'
 
+const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 const cartStore = useCartStore()
 
 const product = ref(null)
 const loading = ref(true)
+
 
 const loadDetail = async () => {
   try {
@@ -33,19 +36,52 @@ const handlePreview = () => {
   showImagePreview([imgUrl])
 }
 
-const addToCart = () => {
+const addToCart = async () => {
   if (!product.value) return
-  cartStore.addToCart(product.value, 1) // 默认数量为 1
+
+  // 拦截未登录
+  if (!auth.isLoggedIn) {
+    auth.isLoginModalOpen = true
+    return showToast('请先登录后再加入购物车')
+  }
+
+  await cartStore.add(product.value.id, 1)
   showToast({type: 'success', message: '已加入购物车'})
 }
 
 const buyNow = () => {
-  router.push('/checkout')
+  if (!product.value) return
+  if (!auth.isLoggedIn) {
+    auth.isLoginModalOpen = true
+    return showToast('请先登录后再购买')
+  }
+
+  // 将商品信息存入 sessionStorage，并打上 direct_buy 标记
+  const directItem = {
+    product_id: product.value.id,
+    quantity: 1,
+    name: product.value.name,
+    price: product.value.price,
+    image_url: product.value.image_url,
+    spec: product.value.spec
+  }
+  sessionStorage.setItem('direct_buy_item', JSON.stringify(directItem))
+  // 清除之前可能残留的购物车结算标记
+  sessionStorage.removeItem('checkout_items')
+
+  router.push('/checkout?mode=direct')
 }
 
 const goToService = () => {
   router.push('/service')
 }
+
+onMounted(async () => {
+  await loadDetail()
+  if (auth.isLoggedIn) {
+    cartStore.fetchCart()
+  }
+})
 
 onMounted(loadDetail)
 </script>

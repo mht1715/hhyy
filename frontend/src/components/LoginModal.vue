@@ -1,16 +1,22 @@
 <script setup>
 import {useAuthStore} from '../store/auth'
-import {useRouter} from 'vue-router'
+import {useRouter, useRoute} from 'vue-router' // 补充引入 useRoute
 import {X, ShieldCheck, Stethoscope, User} from 'lucide-vue-next'
+import {showToast} from 'vant' // 建议把 alert 换成 Vant 的 Toast
 
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute() // 实例化 route
+
 const quickLogin = async (username, rolePath) => {
   try {
     await auth.login(username)
-    router.push(rolePath)
+    // 使用 route.path 判断当前是否在游客首页
+    if (route.path === '/') {
+      router.push(rolePath)
+    }
   } catch (err) {
-    alert('登录失败，请确保后端服务已启动')
+    showToast({type: 'fail', message: '登录失败，请确保后端服务已启动'})
   }
 }
 </script>

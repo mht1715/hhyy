@@ -2,7 +2,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from app.api import auth, product, agent, upload, agent_drug
+from app.api import auth, product, agent, upload, agent_drug, cart, order
 
 app = FastAPI()
 
@@ -18,6 +18,8 @@ app.add_middleware(
 # 注册路由，注意这里的前缀必须和前端匹配
 app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(product.router, prefix="/api/products", tags=["Products"])
+app.include_router(cart.router, prefix="/api/cart", tags=["Cart"])
+app.include_router(order.router, prefix="/api/orders", tags=["Orders"])
 app.include_router(agent.router, prefix="/api/agent", tags=["Agent"])
 app.include_router(agent_drug.router, prefix="/api/agent", tags=["Agent-Drug"])
 app.include_router(upload.router, prefix="/api/upload", tags=["Upload"])  # 注册上传

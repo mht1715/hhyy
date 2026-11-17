@@ -38,12 +38,20 @@ const routes = [
     {
         path: '/checkout',
         name: 'Checkout',
-        component: () => import('../views/CheckoutView.vue')
+        component: () => import('../views/CheckoutView.vue'),
+        meta: {requiresAuth: true}
     },
     {
         path: '/service',
         name: 'Service',
-        component: () => import('../views/ServiceView.vue')
+        component: () => import('../views/ServiceView.vue'),
+        meta: {requiresAuth: true}
+    },
+    {
+        path: '/orders',
+        name: 'Orders',
+        component: () => import('../views/OrderView.vue'),
+        meta: {requiresAuth: true}
     }
 ]
 
