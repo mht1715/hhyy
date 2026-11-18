@@ -30,6 +30,10 @@ const createAssistantMessage = () => ({
   tools: [],
   citations: [],
   handoff: null,
+  // M3：本轮注入的记忆（memory 事件）与「AI 被静默」标记
+  memory: null,
+  silenced: false,
+  memoryUsed: null,
   usage: null,
   guardrail: null,
   suggestedActions: [],
@@ -61,6 +65,41 @@ const normalizeInitialMessage = (item, index) => {
   }
 }
 
+// 历史消息（GET /api/conversations/{id}）→ 气泡。role 必须原样保留：
+// 人工客服的消息和 AI 的必须分得开，否则用户会以为是自己发的
+const HISTORY_ROLES = new Set(['user', 'assistant', 'human_agent'])
+
+const normalizeHistoryMessage = (item, index) => {
+  const raw = item && typeof item === 'object' ? item : {}
+  return {
+    id: raw.id || `history-${index}`,
+    role: HISTORY_ROLES.has(raw.role) ? raw.role : 'assistant',
+    content: raw.content !== undefined ? raw.content : '',
+    actor_name: raw.actor_name || '',
+    status: 'done',
+    createdAt: raw.created_at || raw.createdAt || null,
+    mentions: [],
+    agentsRunning: [],
+    contributors: Array.isArray(raw.contributors) ? raw.contributors : [],
+    retrieval: [],
+    tools: [],
+    citations: Array.isArray(raw.citations) ? raw.citations : [],
+    handoff: null,
+    memory: null,
+    silenced: false,
+    stopped: false,
+    error: null,
+    conversationId: raw.conversation_id || null,
+    messageId: raw.id || null,
+    traceId: null,
+    latencyMs: null,
+    memoryUsed: null,
+    usage: null,
+    guardrail: null,
+    suggestedActions: []
+  }
+}
+
 /**
  * 通用 Agent 会话状态机。
  *
@@ -79,11 +118,48 @@ export function useAgentChat({agentCode = 'drug_consult', context = null, initia
   const error = ref(null)
   const route = ref(null)
   const conversationId = ref(null)
+
+  // M3：会话级状态（不挂在单条消息上）
+  // status: bot_active / handoff_pending / human_active / closed（'' 表示还没拿到 meta）
+  // ticket: 当前活跃工单（供 HandoffBar 展示排队位次 / 倒计时）
+  // memoryState: meta.memory → {enabled, count}
+  const status = ref('')
+  const ticket = ref(null)
+  const memoryState = ref(null)
+
   const canSend = computed(() => !streaming.value)
+
+  const applySupportState = (patch = {}) => {
+    if (patch.status !== undefined) status.value = patch.status || ''
+    if (patch.ticket !== undefined) ticket.value = patch.ticket || null
+  }
 
   // 当前请求的 controller / 轮次令牌：stop 之后旧请求的 finally 不能影响新请求
   let controller = null
   let activeToken = null
+
+  /**
+   * 用服务端会话详情还原整个会话（刷新页面 / 从「我的会话」跳回来时用）。
+   * 状态只认服务端：本地猜出来的 status 会让排队条和输入框说反话。
+   * @param {{id: string, status?: string, ticket?: object, messages?: Array}} conversation
+   * @returns {boolean}
+   */
+  const hydrate = (conversation) => {
+    if (!conversation || !conversation.id) return false
+    if (controller) controller.abort()
+    controller = null
+    activeToken = null
+    streaming.value = false
+    error.value = null
+    route.value = null
+    conversationId.value = conversation.id
+    status.value = conversation.status || ''
+    ticket.value = conversation.ticket || null
+    messages.value = (Array.isArray(conversation.messages) ? conversation.messages : [])
+      .filter((item) => item && item.role !== 'system')
+      .map(normalizeHistoryMessage)
+    return true
+  }
 
   const upsertContributor = (message, contributor) => {
     if (!contributor || !contributor.code) return
@@ -124,6 +200,10 @@ export function useAgentChat({agentCode = 'drug_consult', context = null, initia
         }
         if (payload.message_id) message.messageId = payload.message_id
         if (payload.trace_id) message.traceId = payload.trace_id
+        // M3 增量：进页面 / 刷新时靠 meta 还原 HandoffBar
+        if (payload.status) status.value = payload.status
+        if (payload.ticket !== undefined) ticket.value = payload.ticket || null
+        if (payload.memory) memoryState.value = payload.memory
         break
 
       case 'route':
@@ -165,6 +245,17 @@ export function useAgentChat({agentCode = 'drug_consult', context = null, initia
         }
         break
 
+      // M3：本轮参考了哪些记忆（在 route 之后、delta 之前到达）
+      case 'memory':
+        message.memory = payload
+        if (payload && payload.profile && typeof payload.profile.enabled === 'boolean') {
+          memoryState.value = {
+            ...(memoryState.value && typeof memoryState.value === 'object' ? memoryState.value : {}),
+            enabled: payload.profile.enabled
+          }
+        }
+        break
+
       case 'delta':
         // 用户已点停止：即使还有残包在管道里，也不允许再追加 token
         if (signal.aborted) break
@@ -175,6 +266,12 @@ export function useAgentChat({agentCode = 'drug_consult', context = null, initia
 
       case 'handoff':
         message.handoff = payload
+        // M3：真实建单的 handoff 事件带 ticket_id，直接写进会话级 ticket 供 HandoffBar 用；
+        // refusal / emotion 只发 suggested_actions，没有 ticket_id，不能覆盖已有工单
+        if (payload && payload.ticket_id) {
+          ticket.value = payload
+          status.value = 'handoff_pending'
+        }
         break
 
       case 'done':
@@ -184,6 +281,21 @@ export function useAgentChat({agentCode = 'drug_consult', context = null, initia
         if (payload.latency_ms !== undefined) message.latencyMs = payload.latency_ms
         if (payload.usage) message.usage = payload.usage
         if (payload.guardrail) message.guardrail = payload.guardrail
+        // M3 增量：silenced=true 表示会话已由人工接管，AI 不出声
+        if (payload.silenced === true) {
+          message.silenced = true
+          message.silencedAt = Date.now()
+        }
+        if (payload.memory_used !== undefined) {
+          message.memoryUsed = Number(payload.memory_used) || 0
+        }
+        if (payload.status) status.value = payload.status
+        if (payload.ticket !== undefined) {
+          // done 里的 ticket 可能是精简版（{ticket_id, queue_position}），合并而不是覆盖
+          ticket.value = payload.ticket
+            ? {...(ticket.value && typeof ticket.value === 'object' ? ticket.value : {}), ...payload.ticket}
+            : null
+        }
         // done 里的 citations 是权威列表（后端已按正文裁剪、且保留原序号）：
         // 直接的 citation 事件可能多发了「没被引用」的，以 done 为准整体替换
         if (Array.isArray(payload.citations)) {
@@ -248,7 +360,8 @@ export function useAgentChat({agentCode = 'drug_consult', context = null, initia
     const payload = {
       agent_code: agentCode || 'drug_consult',
       conversation_id: conversationId.value,
-      client_message_id: uuid(),
+      // 与本地气泡同 id：人工接管后这条会经 WS 广播回来，前端靠它去重
+      client_message_id: userMessage.clientMessageId || userMessage.id || uuid(),
       message: userMessage.content,
       mentions: userMessage.mentions || [],
       context: {
@@ -341,6 +454,8 @@ export function useAgentChat({agentCode = 'drug_consult', context = null, initia
       mentions,
       createdAt: Date.now()
     }
+    // 幂等键与气泡 id 一致：服务端回带 client_message_id 时能对上是哪一条
+    userMessage.clientMessageId = userMessage.id
 
     messages.value.push(userMessage)
     return runStream(userMessage)
@@ -385,6 +500,8 @@ export function useAgentChat({agentCode = 'drug_consult', context = null, initia
 
     const userMessage = messages.value[userIndex]
     messages.value.splice(userIndex + 1)
+    // 重试是「重新生成」而不是「重放」：换幂等键，否则后端按 client_message_id 重放旧答案
+    userMessage.clientMessageId = uuid()
     return runStream(userMessage)
   }
 
@@ -396,6 +513,9 @@ export function useAgentChat({agentCode = 'drug_consult', context = null, initia
     error.value = null
     route.value = null
     conversationId.value = null
+    status.value = ''
+    ticket.value = null
+    memoryState.value = null
     messages.value = buildInitialMessages()
   }
 
@@ -404,6 +524,12 @@ export function useAgentChat({agentCode = 'drug_consult', context = null, initia
     streaming,
     error,
     route,
+    conversationId,
+    status,
+    ticket,
+    memoryState,
+    applySupportState,
+    hydrate,
     send,
     stop,
     retry,

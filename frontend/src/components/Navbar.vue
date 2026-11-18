@@ -2,7 +2,7 @@
 import {computed, ref} from 'vue'
 import {useAuthStore} from '../store/auth'
 import {useRoute, useRouter} from 'vue-router'
-import {Bot, Hexagon, UserCircle, ChevronDown, LogOut, RefreshCw} from 'lucide-vue-next'
+import {Bot, Brain, ChevronDown, Headphones, Hexagon, LogOut, RefreshCw, UserCircle} from 'lucide-vue-next'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -10,6 +10,9 @@ const router = useRouter()
 const isDropdownOpen = ref(false)
 
 const isAgentsActive = computed(() => route.path === '/agents' || route.path.startsWith('/agents/'))
+
+// M3：support / admin 才能进客服工作台
+const isSupportRole = computed(() => ['support', 'admin'].includes(auth.role))
 
 const toggleDropdown = () => {
   if (auth.isLoggedIn) {
@@ -35,8 +38,18 @@ const handleLogout = () => {
   router.push('/')
 }
 
-const roleColorMap = {admin: '#ef4444', doctor: '#3b82f6', patient: '#10b981'}
-const roleNameMap = {admin: '管理员', doctor: '医生', patient: '患者'}
+const goMemory = () => {
+  isDropdownOpen.value = false
+  router.push('/me/memory')
+}
+
+const goSupport = () => {
+  isDropdownOpen.value = false
+  router.push('/support')
+}
+
+const roleColorMap = {admin: '#ef4444', doctor: '#3b82f6', patient: '#10b981', support: '#8b5cf6'}
+const roleNameMap = {admin: '管理员', doctor: '医生', patient: '患者', support: '客服'}
 </script>
 
 <template>
@@ -71,6 +84,16 @@ const roleNameMap = {admin: '管理员', doctor: '医生', patient: '患者'}
 
         <!-- 下拉菜单 -->
         <div v-if="isDropdownOpen" class="dropdown-menu">
+          <div class="dropdown-item" @click="goMemory">
+            <Brain :size="14"/>
+            我的记忆
+          </div>
+          <div v-if="isSupportRole" class="dropdown-item" @click="goSupport">
+            <Headphones :size="14"/>
+            客服工作台
+          </div>
+          <div class="dropdown-divider"></div>
+
           <div class="dropdown-header">
             <RefreshCw :size="14"/>
             快捷切换账号
@@ -78,6 +101,7 @@ const roleNameMap = {admin: '管理员', doctor: '医生', patient: '患者'}
           <div class="dropdown-item" @click="switchAccount('admin', '/admin')">admin (管理员)</div>
           <div class="dropdown-item" @click="switchAccount('doctor', '/doctor')">doctor (医生)</div>
           <div class="dropdown-item" @click="switchAccount('patient', '/patient')">patient (患者)</div>
+          <div class="dropdown-item" @click="switchAccount('support', '/support')">support (客服)</div>
           <div class="dropdown-divider"></div>
           <div class="dropdown-item text-danger" @click="handleLogout">
             <LogOut :size="14"/>

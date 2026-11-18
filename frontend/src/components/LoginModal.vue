@@ -1,7 +1,7 @@
 <script setup>
 import {useAuthStore} from '../store/auth'
 import {useRouter, useRoute} from 'vue-router' // 补充引入 useRoute
-import {X, ShieldCheck, Stethoscope, User} from 'lucide-vue-next'
+import {X, ShieldCheck, Stethoscope, User, Headphones} from 'lucide-vue-next'
 import {showToast} from 'vant' // 建议把 alert 换成 Vant 的 Toast
 
 const auth = useAuthStore()
@@ -30,7 +30,7 @@ const quickLogin = async (username, rolePath) => {
         </button>
 
         <h2 class="title">选择体验身份</h2>
-        <p class="subtitle">系统内置了三种角色，点击即可快速登录体验对应权限</p>
+        <p class="subtitle">系统内置了四种角色，点击即可快速登录体验对应权限（客服与患者建议分两个标签页/窗口）</p>
 
         <div class="account-list">
           <!-- 管理员 -->
@@ -63,6 +63,17 @@ const quickLogin = async (username, rolePath) => {
             <div class="info">
               <div class="role-name">普通患者</div>
               <div class="username">patient</div>
+            </div>
+          </div>
+
+          <!-- 客服坐席（M3）：进客服工作台 -->
+          <div class="account-card" @click="quickLogin('support', '/support')">
+            <div class="icon-wrapper bg-purple">
+              <Headphones :size="28" color="white"/>
+            </div>
+            <div class="info">
+              <div class="role-name">客服坐席</div>
+              <div class="username">support</div>
             </div>
           </div>
         </div>
@@ -164,6 +175,10 @@ const quickLogin = async (username, rolePath) => {
 
           &.bg-green {
             background: #10b981;
+          }
+
+          &.bg-purple {
+            background: #8b5cf6;
           }
         }
 

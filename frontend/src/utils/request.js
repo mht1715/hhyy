@@ -1,5 +1,6 @@
 import axios from 'axios'
 import {showToast} from 'vant'
+import {clearAuth, getToken} from './session'
 
 const request = axios.create({
     baseURL: '/api',
@@ -9,7 +10,7 @@ const request = axios.create({
 // 请求拦截器
 request.interceptors.request.use(
     (config) => {
-        const token = localStorage.getItem('token')
+        const token = getToken()
         if (token) {
             config.headers.Authorization = `Bearer ${token}`
         }
@@ -36,7 +37,7 @@ request.interceptors.response.use(
         showToast({type: 'fail', message: msg})
 
         if (error.response?.status === 401) {
-            localStorage.clear()
+            clearAuth()
             // 延迟跳转，让 toast 显示完
             setTimeout(() => {
                 window.location.href = '/'

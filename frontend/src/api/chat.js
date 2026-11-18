@@ -6,13 +6,16 @@
  * 因此流式对话与 Agent 列表都用原生 fetch，鉴权头手动补。
  */
 
+import {getToken as readToken} from '../utils/session'
+
 let agentsCache = null
 // 同时发起的列表请求合并成一次，避免 @ 候选与广场各拉一遍
 let agentsRequest = null
 
 const getToken = () => {
   try {
-    return localStorage.getItem('token') || ''
+    // 本标签页优先：两个标签页可以分别是患者 / 客服（同一浏览器演示）
+    return readToken()
   } catch (e) {
     return ''
   }

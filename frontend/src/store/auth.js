@@ -1,12 +1,14 @@
 import {defineStore} from 'pinia'
 import {loginApi} from '../api/auth'
 import {useCartStore} from './cart'
+import {clearAuth, getRole, getToken, getUsername, setAuth} from '../utils/session'
 
 export const useAuthStore = defineStore('auth', {
     state: () => ({
-        token: localStorage.getItem('token') || '',
-        username: localStorage.getItem('username') || '',
-        role: localStorage.getItem('role') || '',
+        // 优先本标签页的登录态：同一浏览器两个标签页可以分别是患者 / 客服
+        token: getToken(),
+        username: getUsername(),
+        role: getRole(),
         isLoginModalOpen: false
     }),
     getters: {
@@ -26,19 +28,23 @@ export const useAuthStore = defineStore('auth', {
             this.token = res.access_token
             this.username = res.username
             this.role = res.role
-            localStorage.setItem('token', this.token)
-            localStorage.setItem('username', this.username)
-            localStorage.setItem('role', this.role)
             this.isLoginModalOpen = false // 登录成功自动关闭弹窗
-            // 登录成功后，立刻拉取购物车
-            const cartStore = useCartStore()
-            await cartStore.fetchCart()
+            setAuth({token: this.token, role: this.role, username: this.username})
+            // 登录成功后，立刻拉取购物车。
+            // 但购物车只是附属数据：客服这类没有购物车的角色会 403，
+            // 不能因此把「登录成功」变成「切换失败」（M3 踩过：客服根本进不去工作台）
+            try {
+                const cartStore = useCartStore()
+                await cartStore.fetchCart()
+            } catch (e) {
+                // 忽略：购物车拉不到不影响登录态
+            }
         },
         logout() {
             this.token = ''
             this.username = ''
             this.role = ''
-            localStorage.clear()
+            clearAuth()
             // 退出登录后，清空本地的购物车展示
             const cartStore = useCartStore()
             cartStore.$reset()

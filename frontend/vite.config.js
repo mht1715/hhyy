@@ -67,6 +67,12 @@ export default defineConfig({
             '/static': {
                 target: 'http://localhost:8000',
                 changeOrigin: true
+            },
+            // M3 人工客服 WebSocket：必须开 ws:true，否则浏览器连不上
+            '/ws': {
+                target: 'ws://localhost:8000',
+                changeOrigin: true,
+                ws: true
             }
         }
 

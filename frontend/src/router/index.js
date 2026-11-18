@@ -1,5 +1,6 @@
 import {createRouter, createWebHistory} from 'vue-router'
 import {canAccess, resolveHomePath} from '../utils/permission'
+import {getRole, getToken} from '../utils/session'
 
 const routes = [
     {
@@ -85,6 +86,20 @@ const routes = [
         component: () => import('../views/ServiceView.vue'),
         meta: {requiresAuth: true}
     },
+    // M3：记忆管理（登录即可，游客 401 由守卫拦截）
+    {
+        path: '/me/memory',
+        name: 'Memory',
+        component: () => import('../views/MemoryView.vue'),
+        meta: {requiresAuth: true}
+    },
+    // M3：客服工作台（仅 support / admin）
+    {
+        path: '/support',
+        name: 'Support',
+        component: () => import('../views/SupportView.vue'),
+        meta: {requiresAuth: true, roles: ['support', 'admin']}
+    },
     {
         path: '/orders',
         name: 'Orders',
@@ -107,8 +122,9 @@ const router = createRouter({
 // 路由守卫：登录态 + 角色校验
 // 同时支持 meta.role（单角色）与 meta.roles（多角色），判断逻辑收敛到 utils/permission
 router.beforeEach((to) => {
-    const token = localStorage.getItem('token')
-    const role = localStorage.getItem('role') || ''
+    // 与 store / api 用同一套读取顺序（本标签页优先），避免「store 已登录、守卫说没登录」
+    const token = getToken()
+    const role = getRole()
 
     if (to.meta.requiresAuth && !token) {
         return {path: '/', query: {redirect: to.fullPath}}

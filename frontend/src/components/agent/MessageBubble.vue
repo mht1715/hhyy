@@ -61,8 +61,20 @@ const decorateCitations = (html) => {
 
 const content = computed(() => props.message.content || '')
 const isUser = computed(() => props.message.role === 'user')
-const isAssistant = computed(() => !isUser.value)
+// M3：人工客服消息单独一套气泡（左侧、蓝底、头像「客服」）
+const isHumanAgent = computed(() => props.message.role === 'human_agent')
+const isAssistant = computed(() => !isUser.value && !isHumanAgent.value)
 const isStreaming = computed(() => props.message.status === 'streaming')
+// 会话已由人工接管：AI 被静默，不能再显示「生成中 / 正在输入」
+const silenced = computed(() => !!props.message.silenced)
+const actorName = computed(() => (
+  props.message.actor_name || props.message.actorName || '人工客服'
+))
+const bubbleClass = computed(() => {
+  if (isUser.value) return 'is-user'
+  if (isHumanAgent.value) return 'is-human'
+  return 'is-assistant'
+})
 const contributors = computed(() => (Array.isArray(props.message.contributors) ? props.message.contributors : []))
 const stopped = computed(() => !!props.message.stopped)
 
@@ -74,11 +86,16 @@ const html = computed(() => {
 
 const showBubble = computed(() => {
   if (isUser.value) return !!content.value
-  return !!content.value || isStreaming.value || contributors.value.length > 0 || stopped.value
+  if (isHumanAgent.value) return !!content.value
+  return !!content.value
+    || silenced.value
+    || (isStreaming.value && !silenced.value)
+    || contributors.value.length > 0
+    || stopped.value
 })
 
 const showFooter = computed(() => (
-  isAssistant.value && (contributors.value.length > 0 || stopped.value)
+  isAssistant.value && !silenced.value && (contributors.value.length > 0 || stopped.value)
 ))
 
 const handleContentClick = (event) => {
@@ -94,20 +111,29 @@ const handleContentClick = (event) => {
 <template>
   <div
       v-if="showBubble"
-      :class="['message-bubble', isUser ? 'is-user' : 'is-assistant']"
+      :class="['message-bubble', bubbleClass]"
   >
     <template v-if="isUser">
       <div class="bubble user-bubble">{{ content }}</div>
     </template>
 
+    <template v-else-if="isHumanAgent">
+      <div class="human-head">
+        <span class="human-avatar">客服</span>
+        <span class="human-name">{{ actorName }}</span>
+      </div>
+      <div class="bubble human-bubble">{{ content }}</div>
+    </template>
+
     <template v-else>
-      <div class="bubble assistant-bubble" :class="{ 'is-streaming': isStreaming }">
+      <div class="bubble assistant-bubble" :class="{ 'is-streaming': isStreaming && !silenced }">
         <div
             v-if="content"
             class="markdown-body"
             v-html="html"
             @click="handleContentClick"
         ></div>
+        <div v-else-if="silenced" class="silenced-hint">客服已接入，消息将由客服回复</div>
         <div v-else-if="isStreaming" class="empty-thinking">
           <span class="dot"></span>
           <span class="dot"></span>
@@ -137,6 +163,47 @@ const handleContentClick = (event) => {
   &.is-assistant {
     align-self: flex-start;
     align-items: flex-start;
+  }
+
+  &.is-human {
+    align-self: flex-start;
+    align-items: flex-start;
+
+    .human-head {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 4px;
+      padding-left: 2px;
+
+      .human-avatar {
+        width: 22px;
+        height: 22px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 7px;
+        background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+        color: #fff;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+      }
+
+      .human-name {
+        font-size: 12px;
+        font-weight: 600;
+        color: #2563eb;
+      }
+    }
+
+    .human-bubble {
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      color: #1e3a8a;
+      border-radius: 0 12px 12px 12px;
+      white-space: pre-wrap;
+    }
   }
 
   .bubble {
@@ -192,6 +259,12 @@ const handleContentClick = (event) => {
           animation-delay: 0.3s;
         }
       }
+    }
+
+    .silenced-hint {
+      font-size: 12.5px;
+      line-height: 1.6;
+      color: #6b7280;
     }
 
     .bubble-footer {

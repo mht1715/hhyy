@@ -13,7 +13,9 @@
 export const homePathByRole = {
   admin: '/admin',
   doctor: '/doctor',
-  patient: '/patient'
+  patient: '/patient',
+  // M3：客服坐席落地到客服工作台
+  support: '/support'
 }
 
 /**

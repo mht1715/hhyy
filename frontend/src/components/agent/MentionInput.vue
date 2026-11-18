@@ -7,6 +7,8 @@ const props = defineProps({
   modelValue: {type: String, default: ''},
   agents: {type: Array, default: () => []},
   placeholder: {type: String, default: '输入消息，@ 可召唤其他 Agent…'},
+  // 传了 hint 就替换默认的底部提示（例如人工客服受理中要隐藏 @ 说明）
+  hint: {type: String, default: ''},
   disabled: {type: Boolean, default: false},
   // 与 disabled 分开：流式中仍需要露出「停止」按钮
   streaming: {type: Boolean, default: false}
@@ -268,7 +270,8 @@ onMounted(() => {
     </div>
 
     <p class="input-hint">
-      输入 <span class="kbd">@</span> 可召唤其他 Agent，Enter 发送，Shift + Enter 换行
+      <template v-if="hint">{{ hint }}</template>
+      <template v-else>输入 <span class="kbd">@</span> 可召唤其他 Agent，Enter 发送，Shift + Enter 换行</template>
     </p>
   </div>
 </template>
