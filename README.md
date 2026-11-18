@@ -17,12 +17,12 @@
 | 药品入库 Agent（自然语言 → 结构化表单） | ✅ | `/api/agent/parse-product` |
 | 药品咨询 Agent | ✅ | M1 已改为真 RAG：检索 + `[n]` 引用 + 低分拒答（`/api/agent/drug-consult`） |
 | 统一模型工厂 | ✅ | 单一入口，温度/超时/重试集中，缺 key 给 503 而不是崩 |
-| 数据库迁移 | ✅ | Alembic（老库自动 stamp，不重复建表），0001 baseline + 0002 知识库 |
+| 数据库迁移 | ✅ | Alembic（老库自动 stamp，不重复建表），0001 baseline + 0002 知识库 + 0003 多 Agent/会话 |
 | 分层接口契约 | ✅ | LLM / Retriever / Tool / Memory / TraceSink 六个 Protocol + 测试替身 |
 | 可观测（Langfuse） | ✅ | 一键开关，未配置即 no-op，绝不阻塞回答 |
 | CI | ✅ | ruff + pytest + 前端构建 |
 | **多知识库 RAG（Milvus）** | ✅ | M1：解析 / 分块 / 混合检索（BM25+dense+RRF）/ 重排 / 角色 ACL / 检索测试台 |
-| 多 Agent 与 `@` 协作 | 📋 | M2 |
+| **多 Agent 与 `@` 协作** | ✅ | M2：Agent 配置化注册 / `@` 并行 / SSE 流式 / 引用与免责声明 / 幂等与限流 |
 | 记忆系统 + 转人工 | 📋 | M3 |
 | 评估集与指标看板 | 📋 | M4 |
 
@@ -118,6 +118,7 @@ Copy-Item .env.example .env
 | `.\script\dev.ps1 init` | Alembic 建表 / 升级 |
 | `.\script\dev.ps1 seed` | 灌演示数据（账号 + 药品） |
 | `.\script\dev.ps1 kb` | 灌知识库种子（4 库 12 文档，真实调用 embedding） |
+| `.\script\dev.ps1 agents` | 灌 Agent 与 Prompt 模板（4 个 Agent，纯 DB 写入） |
 | `.\script\dev.ps1 test` | 单元测试（不连外部服务） |
 | `.\script\dev.ps1 lint` | ruff |
 | `.\script\dev.ps1 check` | **提交前跑**：lint + test + 前端构建 |
@@ -215,6 +216,88 @@ query ──(有历史→LLM 改写)──> embedding
 
 > 测试台默认「全部库 + patient」，页面会显示 `top_score / 阈值` 和打分口径。
 > 拒答时也会把「差一点」的片段列出来——看不到分数就只能靠猜是权限、召回还是阈值的问题。
+
+---
+
+## 多 Agent 与流式对话（M2）
+
+### 一句话架构
+
+> **Agent 是配置，工具是代码**：往 `agents` 表插一行（选知识库 + 选工具 + 指定 prompt 模板）
+> 就是一个新 Agent，不需要改编排、不需要发版。编排层只读 `AgentConfig`。
+
+```mermaid
+flowchart LR
+    U["用户消息 + mentions[]"] --> R{"路由"}
+    R -->|有 @| M["显式路由<br/>不花模型调用"]
+    R -->|无 @| S["supervisor<br/>JSON: agents/confidence"]
+    S -->|conf < 0.6| C["澄清：列出可用助手"]
+    M --> P1["子 Agent A<br/>工具 + 检索"]
+    M --> P2["子 Agent B<br/>工具 + 检索"]
+    P1 --> G["合并（确定性）<br/>来源标注 + 引用重编号"]
+    P2 --> G
+    G --> GD["Guardrail<br/>角标过滤 + 免责声明"]
+    GD --> SSE["SSE 事件流"]
+```
+
+LangGraph 图：`route → (clarify | dispatch) → compose → guardrail`。状态只放业务字段
+（M3 接 checkpointer 时不动节点），数据库会话/模型/追踪挂在运行时上下文上。
+
+### 四个内置 Agent（`dev.ps1 agents`）
+
+| code | 名称 | 知识库 | 工具 | 可见角色 |
+| --- | --- | --- | --- | --- |
+| `drug_consult` | AI 药师 | `kb_drug_manual` | kb_search / product_lookup / escalate_human | 患者、医生、客服、管理员 |
+| `order_after_sale` | 订单售后 | `kb_after_sale` | order_lookup / policy_search / escalate_human | 患者、医生、客服、管理员 |
+| `company_intro` | 企业介绍 | `kb_company`（public） | kb_search | **游客** + 全部登录角色 |
+| `customer_service` | 客服助手 | `kb_sop` + `kb_company` | kb_search / escalate_human | 仅客服、管理员 |
+
+`@` 候选列表与广场卡片都按角色过滤——**游客只看到「企业介绍」，患者看不到内部 SOP 助手**。
+
+### 工具（Function Calling 注册表）
+
+| 工具 | 作用 | 关键约束 |
+| --- | --- | --- |
+| `kb_search` | 查 Agent 绑定的知识库 | 库 code ∩ 调用方 ACL，过滤仍在检索层 |
+| `policy_search` | 售后政策快捷检索 | 固定限定 `kb_after_sale` |
+| `product_lookup` | 按名称/ID 查药品 | 结构化查询，不走向量 |
+| `order_lookup` | 查订单与物流 | **只能看自己的**，看别人的返回 `FORBIDDEN`；support/admin 例外 |
+| `remember` | 记忆草稿 | M3 会换成真正的记忆存储 |
+| `escalate_human` | 请求转人工 | 敏感词（投诉/赔偿/过量…）自动触发 |
+
+权限在**工具层**校验（`required_roles` + 数据归属），不依赖上层「记得检查」；
+工具异常一律收敛成 `ToolResult(ok=False)`，单个工具挂掉不会让整条回答 500。
+
+### SSE 事件协议（前端契约见 `docs/接口契约-M2.md`）
+
+```
+meta → route → agent(start) → tool / retrieval → agent(done) → citation → delta… → [handoff] → done
+```
+
+- 任何异常路径都必须以 `error` 或 `done` 收尾（`to_sse` 兜底），否则前端只能干等到超时。
+- `delta` 里已经出现的角标**当场过滤**：`[9]` 不在本次上下文里就丢弃（流式下「先发后校验」不成立）。
+- 药品类 Agent 的回答末尾必带免责声明（`guardrail.flags` 会记录 `disclaimer_injected`）。
+
+### 实测延迟（deepseek-flash，本机）
+
+| 场景 | 耗时 | 说明 |
+| --- | --- | --- |
+| 单 Agent（supervisor + 检索 + 流式生成） | 4.2~4.9s | 路由 1s + 检索 0.8s + 生成 2.5s |
+| 双 `@` 并行（两路各答一段） | **5.0s** | 两路并行 2.9s + 确定性合并（≈0s） |
+| 澄清 | 1.2s | 一次路由调用，不生成 |
+
+> 多 Agent 汇总**默认不用模型**：来源由代码拼接、引用按全局重编号。理由有三条——
+> 少一次完整生成（实测 9.4s → 5.0s）、绝不会把 A 的结论说成 B 的、归因可以断言。
+> 需要更连贯的措辞时把 `CHAT_LLM_SYNTHESIS=true` 打开即可切回模型融合。
+
+### 三分钟演示
+
+1. `.\script\dev.ps1 agents` → `/agents` 广场：游客只看到「企业介绍」，登录后 3 个
+2. 药品详情页问「哺乳期能吃吗」→ 逐字流式 + 可点开的 `[1]` 角标 + 免责声明
+3. 同页输入 `@` → 选「订单售后」→ 问「我这单能退吗」→ 回答只讲订单维度（不越界）
+4. 一条消息 `@AI药师 @订单售后 哺乳期能吃吗？这单能退吗？`→ 两段带来源的结论（≈5s）
+5. 不 `@` 直接问「你们公司是做什么的」→ supervisor 自动路由到「企业介绍」（路由理由可见）
+6. `/api/admin/agents` 新建一个 Agent（选库 + 选工具）→ 刷新 `/agents` 立刻出现
 
 ---
 
