@@ -7,6 +7,17 @@ Alembic 的 autogenerate 才能看到完整结构。
 未使用导入删掉（删了不会报错，只会静默生成空迁移，非常难查）。
 """
 
+from app.models.agent import (
+    Agent,
+    AgentStatus,
+    Conversation,
+    ConversationStatus,
+    Message,
+    MessageRole,
+    PromptStatus,
+    PromptTemplate,
+    UiMode,
+)
 from app.models.base import Base
 from app.models.cart import CartItem
 from app.models.kb import (
@@ -27,10 +38,14 @@ from app.models.product import Product
 from app.models.user import User, UserRole
 
 __all__ = [
+    "Agent",
+    "AgentStatus",
     "AuditLog",
     "Base",
     "CartItem",
     "ChunkStrategy",
+    "Conversation",
+    "ConversationStatus",
     "DocumentSource",
     "DocumentStatus",
     "KbChunk",
@@ -40,9 +55,14 @@ __all__ = [
     "KbStatus",
     "KbVisibility",
     "KnowledgeBase",
+    "Message",
+    "MessageRole",
     "Order",
     "OrderItem",
     "Product",
+    "PromptStatus",
+    "PromptTemplate",
+    "UiMode",
     "User",
     "UserRole",
 ]

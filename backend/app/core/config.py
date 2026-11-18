@@ -59,6 +59,25 @@ class Settings(BaseSettings):
     memory_enabled: bool = True
     memory_ttl_days: int = 180
 
+    # --- 多 Agent / 对话（M2）---
+    # Agent 配置缓存 TTL：后台改完会主动失效，这个 TTL 只是多 worker 下的兜底
+    agent_registry_ttl: int = 60
+    # 单个子 Agent 的硬超时（PRD FR1.7）：超时用已得结果作答，不让整条回答挂住
+    agent_timeout_seconds: float = 8.0
+    # 每用户（或每 IP）每分钟对话次数上限
+    chat_rate_limit_per_minute: int = 20
+    # 幂等窗口：同一 client_message_id 在窗口内重放上次结果（PRD FR1.8）
+    chat_idempotency_seconds: int = 300
+    # 带进 prompt 的历史轮数（一问一答算一轮）
+    chat_history_turns: int = 6
+    # supervisor 置信度低于该值时先澄清/给转人工（PRD FR1.4）
+    supervisor_confidence_floor: float = 0.6
+    # 关闭后所有「没有 @ 的提问」都直连主 Agent（省一次模型调用，但多 Agent 就没入口了）
+    supervisor_enabled: bool = True
+    # 多 Agent 汇总是否再花一次模型调用做「语言融合」。默认关：
+    # 确定性合并（代码拼来源）更快、也不会把 A 的结论说成 B 的。
+    chat_llm_synthesis: bool = False
+
     # --- 人工介入 ---
     handoff_queue_timeout: int = 90
 

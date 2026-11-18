@@ -66,6 +66,24 @@ async def redis_ping() -> bool:
         return False
 
 
+async def rate_limit_hit(key: str, *, limit: int, window_seconds: int = 60) -> tuple[bool, int]:
+    """滑动窗口计数（固定窗口实现）。
+
+    返回 ``(是否放行, 当前计数)``。**Redis 挂了就放行**——限流是保护措施，
+    不该因为缓存故障把所有人的对话都拒绝掉（可用性优先于节流）。
+    """
+    try:
+        client = get_redis()
+        pipe = client.pipeline()
+        pipe.incr(key)
+        pipe.expire(key, window_seconds)
+        count = int((await pipe.execute())[0])
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("rate limit 失败（%s）：%s", key, exc)
+        return True, 0
+    return count <= limit, count
+
+
 def reset_redis_cache() -> None:
     """测试用：丢掉连接缓存。"""
     get_redis.cache_clear()

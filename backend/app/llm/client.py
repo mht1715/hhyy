@@ -26,16 +26,22 @@ def _require(value: str, name: str) -> str:
     return value
 
 
-@lru_cache(maxsize=8)
+@lru_cache(maxsize=16)
 def get_chat_client(
     temperature: float | None = None,
     model: str | None = None,
+    max_tokens: int | None = None,
 ) -> ChatOpenAI:
     """获取对话模型实例。
 
     :param temperature: 覆盖默认温度（默认取 ``settings.llm_temperature``）。
     :param model: 覆盖默认模型（默认取 ``settings.deepseek_chat_model``）。
+    :param max_tokens: 硬性截断输出长度。多 Agent 汇总场景必须给上限——
+        没有上限时模型会把两段结论各自展开，首屏延迟直接翻倍。
     """
+    kwargs: dict[str, object] = {}
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
     return ChatOpenAI(
         model=model or settings.deepseek_chat_model,
         api_key=_require(settings.deepseek_api_key, "DEEPSEEK_API_KEY"),
@@ -43,6 +49,7 @@ def get_chat_client(
         temperature=settings.llm_temperature if temperature is None else temperature,
         timeout=settings.llm_timeout,
         max_retries=settings.llm_max_retries,
+        **kwargs,
     )
 
 

@@ -17,7 +17,7 @@ param(
     [Parameter(Position = 0)]
     [ValidateSet(
         'help', 'up', 'down', 'status', 'logs',
-        'init', 'seed', 'kb', 'test', 'lint', 'check', 'langfuse',
+        'init', 'seed', 'kb', 'agents', 'test', 'lint', 'check', 'langfuse',
         'backend', 'frontend'
     )]
     [string]$Command = 'help'
@@ -49,6 +49,7 @@ HHAgent 开发脚本
   init      建表 / 升级数据库（Alembic）
   seed      灌入演示账号与药品数据
   kb        灌入知识库种子数据（4 库 12 文档，会真实调用 embedding）
+  agents    灌入 Agent 与 Prompt 模板（4 个 Agent，纯 DB 写入，很快）
   backend   本地起后端（uvicorn --reload，读取根目录 .env）
   frontend  本地起前端（vite）
   test      单元测试（不连外部服务）
@@ -58,7 +59,7 @@ HHAgent 开发脚本
 
 示例：
   .\script\dev.ps1 up
-  .\script\dev.ps1 init; .\script\dev.ps1 seed; .\script\dev.ps1 kb
+  .\script\dev.ps1 init; .\script\dev.ps1 seed; .\script\dev.ps1 kb; .\script\dev.ps1 agents
   .\script\dev.ps1 check
 "@ | Write-Host
 }
@@ -99,6 +100,11 @@ switch ($Command) {
     'kb' {
         Write-Step '灌入知识库种子数据（4 库 12 文档，会真实调用 embedding，约 1-2 分钟）'
         & $Py (Join-Path $Root 'script\seed_kb.py')
+    }
+
+    'agents' {
+        Write-Step '灌入 Agent 与 Prompt 模板（4 个 Agent）'
+        & $Py (Join-Path $Root 'script\seed_agents.py')
     }
 
     'test' {

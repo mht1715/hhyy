@@ -97,6 +97,55 @@ class FakeReranker:
         return ordered[:top_n]
 
 
+class FakeRetrievalService:
+    """``RetrievalService.retrieve`` 的替身（含 db 参数，签名与生产一致）。
+
+    与 :class:`FakeRetriever` 的区别：那个是「检索器协议」，这个是「检索服务」，
+    后者会被工具层直接调用，所以必须接受 ``db/role/user_id``。
+    """
+
+    def __init__(
+        self,
+        chunks: Sequence[RetrievedChunk] | None = None,
+        *,
+        reason: str = "no_hit",
+    ) -> None:
+        self.chunks = list(chunks or [])
+        self.reason = reason
+        self.calls: list[dict[str, Any]] = []
+
+    async def retrieve(
+        self,
+        db: Any,
+        query: str,
+        *,
+        role: Any,
+        user_id: Any = None,
+        kb_ids: Sequence[str] | None = None,
+        top_k: int | None = None,
+        **kwargs: Any,
+    ) -> RetrievalResult:
+        self.calls.append(
+            {"query": query, "role": role, "kb_ids": list(kb_ids or []), "top_k": top_k}
+        )
+        allowed = [chunk for chunk in self.chunks if chunk.kb_id in set(kb_ids or [])]
+        allowed.sort(key=lambda chunk: chunk.score, reverse=True)
+        if top_k:
+            allowed = allowed[:top_k]
+        result = RetrievalResult(
+            query=query,
+            chunks=allowed,
+            kb_ids=list(kb_ids or []),
+            top_score=allowed[0].score if allowed else 0.0,
+            score_source="rerank",
+            threshold=0.15,
+        )
+        if not allowed:
+            result.refused = True
+            result.reason = self.reason
+        return result
+
+
 class FakeMemoryStore:
     """内存版长期记忆。"""
 
