@@ -17,6 +17,10 @@ class UserRole(str, enum.Enum):
     ADMIN = "admin"
     DOCTOR = "doctor"  # 医生
     PATIENT = "patient"  # 患者
+    # 客服坐席（M1 新增）：可接管会话、查订单售后知识库，但进不了知识库后台。
+    # 注意 PG 的 userrole 枚举存的是成员名（'ADMIN'/'SUPPORT'），不是 value，
+    # 迁移里必须 ALTER TYPE userrole ADD VALUE 'SUPPORT'。
+    SUPPORT = "support"
 
 
 class User(Base):

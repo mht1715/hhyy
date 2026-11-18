@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api import agent, agent_drug, auth, cart, order, product, upload
+from app.api import admin_kb, agent, agent_drug, auth, cart, order, product, upload
 from app.core.config import settings
 from app.observability.tracing import get_trace_sink
 
@@ -36,6 +36,7 @@ app.include_router(order.router, prefix="/api/orders", tags=["Orders"])
 app.include_router(agent.router, prefix="/api/agent", tags=["Agent"])
 app.include_router(agent_drug.router, prefix="/api/agent", tags=["Agent-Drug"])
 app.include_router(upload.router, prefix="/api/upload", tags=["Upload"])  # 注册上传
+app.include_router(admin_kb.router, prefix="/api/admin/kb", tags=["Admin-KB"])
 
 # 挂载静态文件目录，让浏览器可以直接访问 /static/xxx.jpg
 app.mount("/static", StaticFiles(directory="static"), name="static")

@@ -38,9 +38,21 @@ class Settings(BaseSettings):
     rag_collection: str = "hhyy_kb_chunks"
     retrieval_top_k: int = 30
     rerank_top_n: int = 5
+    # 余弦相似度阈值：仅在重排不可用、退回 dense 检索时使用，库未配置时取这个默认值
     score_threshold: float = Field(default=0.30, ge=0.0, le=1.0)
-    rerank_model: str = "gte-rerank"
+    rerank_model: str = "gte-rerank-v2"
+    rerank_base_url: str = "https://dashscope.aliyuncs.com"
     rerank_enabled: bool = True
+    # 重排分阈值：重排分和余弦分是两套分布，不能共用一个数（实测见 rag/reranker.py）。
+    # 0.15 来自 10 正 / 10 负问题的实测分界：负例最高 0.135，正例最低 0.175。
+    rerank_score_threshold: float = Field(default=0.15, ge=0.0, le=1.0)
+    # ACL 缓存存活时间：PRD §3.4 要求权限变更 ≤30s 生效
+    acl_cache_ttl: int = 30
+
+    # --- 知识库（M1）---
+    kb_storage_dir: str = "backend/static/kb"  # 相对仓库根
+    kb_max_file_mb: int = 20
+    kb_chunk_max_chars: int = 800
 
     # --- 记忆 ---
     memory_collection: str = "hhyy_memory"

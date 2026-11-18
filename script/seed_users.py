@@ -20,6 +20,8 @@ async def seed():
             {"username": "admin", "password": "123456", "role": UserRole.ADMIN},
             {"username": "doctor", "password": "123456", "role": UserRole.DOCTOR},
             {"username": "patient", "password": "123456", "role": UserRole.PATIENT},
+            # M1 新增：客服坐席，用来演示「同一问题不同角色看到的答案不同」
+            {"username": "support", "password": "123456", "role": UserRole.SUPPORT},
         ]
         for u in users:
             res = await db.execute(select(User).where(User.username == u["username"]))

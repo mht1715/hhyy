@@ -11,6 +11,8 @@ from app.models.user import User
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+# 游客可用的接口（如药品咨询）需要「有 token 就解析、没有就当游客」，不能用会 401 的那个
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
 
 class TokenResponse(BaseModel):
@@ -49,3 +51,25 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
     if user is None:
         raise HTTPException(status_code=401, detail="用户不存在")
     return user
+
+
+async def get_optional_user(
+    token: str | None = Depends(oauth2_scheme_optional),
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    """可选登录：令牌缺失或无效时返回 ``None``（按游客处理），不抛 401。
+
+    只给「游客也能用、但登录后能多看到一些内容」的接口使用，
+    权限仍由 ACL 按角色判定——这里不做任何降级放行。
+    """
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str | None = payload.get("sub")
+    except jwt.PyJWTError:
+        return None
+    if not username:
+        return None
+    result = await db.execute(select(User).where(User.username == username))
+    return result.scalar_one_or_none()

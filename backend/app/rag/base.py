@@ -37,13 +37,19 @@ class RetrievalResult:
     filtered_out_kb_ids: list[str] = field(default_factory=list)
     refused: bool = False
     reason: str | None = None
-
-    @property
-    def top_score(self) -> float:
-        return self.chunks[0].score if self.chunks else 0.0
+    # 阈值判定用的分数：**拒答时也要保留**，否则后台只能看到 0.0，无法判断是
+    # 「差一点没过」还是「召回为空」，排查全靠猜。
+    top_score: float = 0.0
+    # 这个 top_score 是什么口径的分：余弦相似度（dense）还是重排分（rerank）
+    score_source: str = "dense"
+    threshold: float | None = None
+    # 因低于阈值被拒时，把「差一点」的片段留在这里给检索测试台看；不参与拼上下文
+    rejected_chunks: list[RetrievedChunk] = field(default_factory=list)
 
     def as_context(self, max_chars: int = 6000) -> str:
         """拼成给 LLM 的上下文，带 [n] 角标。"""
+        if self.refused:  # 拒答时绝不给上下文，防止调用方漏判 refused 后硬答
+            return ""
         parts: list[str] = []
         used = 0
         for index, chunk in enumerate(self.chunks, start=1):

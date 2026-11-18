@@ -9,15 +9,40 @@ Alembic 的 autogenerate 才能看到完整结构。
 
 from app.models.base import Base
 from app.models.cart import CartItem
+from app.models.kb import (
+    AuditLog,
+    ChunkStrategy,
+    DocumentSource,
+    DocumentStatus,
+    KbChunk,
+    KbDocument,
+    KbRolePermission,
+    KbSearchLog,
+    KbStatus,
+    KbVisibility,
+    KnowledgeBase,
+)
 from app.models.order import Order, OrderItem
 from app.models.product import Product
-from app.models.user import User
+from app.models.user import User, UserRole
 
 __all__ = [
+    "AuditLog",
     "Base",
     "CartItem",
+    "ChunkStrategy",
+    "DocumentSource",
+    "DocumentStatus",
+    "KbChunk",
+    "KbDocument",
+    "KbRolePermission",
+    "KbSearchLog",
+    "KbStatus",
+    "KbVisibility",
+    "KnowledgeBase",
     "Order",
     "OrderItem",
     "Product",
     "User",
+    "UserRole",
 ]

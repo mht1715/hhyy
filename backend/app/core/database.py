@@ -3,9 +3,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.core.config import settings
 
 # 创建异步引擎
+# echo 只在 LOG_LEVEL=DEBUG 时打开：默认开着会把每次检索、每批 embedding 的 SQL 全打出来，
+# 既拖慢速度，又让真正的告警淹没在日志里。
 engine = create_async_engine(
     settings.database_url,
-    echo=True,  # 开发阶段可以改为 True 查看 SQL 日志
+    echo=settings.log_level.upper() == "DEBUG",
     pool_size=10,
     max_overflow=20
 )

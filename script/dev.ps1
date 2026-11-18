@@ -17,7 +17,7 @@ param(
     [Parameter(Position = 0)]
     [ValidateSet(
         'help', 'up', 'down', 'status', 'logs',
-        'init', 'seed', 'test', 'lint', 'check', 'langfuse',
+        'init', 'seed', 'kb', 'test', 'lint', 'check', 'langfuse',
         'backend', 'frontend'
     )]
     [string]$Command = 'help'
@@ -48,6 +48,7 @@ HHAgent 开发脚本
   logs      跟踪依赖日志
   init      建表 / 升级数据库（Alembic）
   seed      灌入演示账号与药品数据
+  kb        灌入知识库种子数据（4 库 12 文档，会真实调用 embedding）
   backend   本地起后端（uvicorn --reload，读取根目录 .env）
   frontend  本地起前端（vite）
   test      单元测试（不连外部服务）
@@ -57,7 +58,7 @@ HHAgent 开发脚本
 
 示例：
   .\script\dev.ps1 up
-  .\script\dev.ps1 init; .\script\dev.ps1 seed
+  .\script\dev.ps1 init; .\script\dev.ps1 seed; .\script\dev.ps1 kb
   .\script\dev.ps1 check
 "@ | Write-Host
 }
@@ -93,6 +94,11 @@ switch ($Command) {
         Write-Step '灌入种子数据'
         & $Py (Join-Path $Root 'script\seed_users.py')
         & $Py (Join-Path $Root 'script\seed_products.py')
+    }
+
+    'kb' {
+        Write-Step '灌入知识库种子数据（4 库 12 文档，会真实调用 embedding，约 1-2 分钟）'
+        & $Py (Join-Path $Root 'script\seed_kb.py')
     }
 
     'test' {
