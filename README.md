@@ -17,14 +17,14 @@
 | 药品入库 Agent（自然语言 → 结构化表单） | ✅ | `/api/agent/parse-product` |
 | 药品咨询 Agent | ✅ | M1 已改为真 RAG：检索 + `[n]` 引用 + 低分拒答（`/api/agent/drug-consult`） |
 | 统一模型工厂 | ✅ | 单一入口，温度/超时/重试集中，缺 key 给 503 而不是崩 |
-| 数据库迁移 | ✅ | Alembic（老库自动 stamp，不重复建表），0001 baseline + 0002 知识库 + 0003 多 Agent/会话 + 0004 记忆/工单（checkpointer 的表由库自带 `setup()` 建） |
+| 数据库迁移 | ✅ | Alembic（老库自动 stamp，不重复建表），0001 baseline + 0002 知识库 + 0003 多 Agent/会话 + 0004 记忆/工单 + 0005 评估/治理（checkpointer 的表由库自带 `setup()` 建） |
 | 分层接口契约 | ✅ | LLM / Retriever / Tool / Memory / TraceSink 六个 Protocol + 测试替身 |
 | 可观测（Langfuse） | ✅ | 一键开关，未配置即 no-op，绝不阻塞回答 |
 | CI | ✅ | ruff + pytest + 前端构建 |
 | **多知识库 RAG（Milvus）** | ✅ | M1：解析 / 分块 / 混合检索（BM25+dense+RRF）/ 重排 / 角色 ACL / 检索测试台 |
 | **多 Agent 与 `@` 协作** | ✅ | M2：Agent 配置化注册 / `@` 并行 / SSE 流式 / 引用与免责声明 / 幂等与限流 |
 | **记忆系统 + 转人工** | ✅ | M3：checkpointer 短期记忆 / 语义记忆 / 敏感场景秒级建单 / WS 坐席端 / AI 静默 |
-| 评估集与指标看板 | 📋 | M4 |
+| **评估、治理与演示** | ✅ | M4：golden set 50 条（recall@5 0.94 / 拒答 0.94）/ 合规词表与流式改写 / Prompt 版本与灰度 / 指标看板 / 👍👎 反馈闭环 |
 
 ---
 
@@ -390,6 +390,113 @@ flowchart LR
 | WS 双向 | 两个真实 WS 客户端互发，秒级到达 |
 | AI 静默 | 流里只有 `meta` + `done(silenced=true)` |
 | checkpointer | 新进程读回上一轮图状态（`route` / `messages` / `handoff` / `guardrail`） |
+
+---
+
+## 评估与治理（M4）
+
+### 一条命令跑评估
+
+```powershell
+# 检索模式（默认，不调生成模型）：50 条约 45 秒
+$env:PYTHONPATH="backend"; .venv/Scripts/python -X utf8 tests/eval/run_eval.py
+
+# 全链路模式：真的调 /api/chat/stream，可选 LLM judge 判 faithfulness
+.venv/Scripts/python -X utf8 tests/eval/run_eval.py --mode full --limit 4 --judge
+```
+
+golden set 在 `script/eval_cases.json`：50 条覆盖 4 个知识库（说明书 22 / 售后 14 / 企业 9 / 客服 SOP 5），
+其中 **12 条应拒答**（问库里没有的疾病、货到付款、改地址、内部密码…）。
+每条带 `expect_docs`（recall@5 / MRR）、`must_include` / `must_not_include`、`should_refuse`。
+
+| 指标 | 检索模式（50 条） | 全链路（4~6 条抽样） | 口径 |
+| --- | --- | --- | --- |
+| recall@5 | **0.94** | 0.75~0.83 | top-5 命中期望文档 |
+| MRR | **0.93** | 0.75~0.83 | 第一个命中的排名倒数 |
+| 拒答准确率 | **0.94** | 1.00 | 是否该拒答 vs 实际拒答 |
+| 引用准确率 | — | 0.42~0.50 | 引用文档里属于期望文档的比例（多引用会拉低，口径偏严） |
+| faithfulness | — | 0.60 | LLM judge：回答的断言能否在引用片段里找到依据 |
+
+失败样例（检索模式 3 条）也会直接打印，`--json` 可导出完整结果；每次运行写进 `eval_runs` 表，看板读最新一条。
+**为什么默认是检索模式**：50 条全链路要 5~8 分钟且烧钱，日常回归只关心 recall / 拒答有没有掉。
+
+> 三个失败案例很能说明问题：都是「检索层能判断主题相关，判断不了资料是否回答了问题」。
+> 「支持货到付款吗」「下单后能改收货地址吗」命中了配送文档但没有答案（应拒答却答了）；
+> 「遇到用户辱骂怎么办」SOP 里其实有流程却低分拒答（同义词/重排问题）。
+> 前者要 LLM judge 或覆盖率规则，后者要改召回——这就是 M4 之后该做的事，而不是把指标写成 1.0。
+
+检索层另加了一道**范围守卫**（`app/rag/scope.py`）：问题里出现库里完全没提的疾病
+（糖尿病 / 癌症 / 减肥 / 骨折…）时，分数再高也拒答。加它之前拒答准确率 0.86，加了之后 0.94。
+
+### 输出治理（Guardrail）
+
+`app/guardrail/` 五层，后两层是 M4 新增：
+
+| 层 | 做什么 | 位置 |
+| --- | --- | --- |
+| ① JSON Schema | 结构化输出校验（药品入库 / 路由），失败可带错误重试 | `validators.validate_json_output` |
+| ② 业务规则 | 批准文号格式（`国药准字[A-Z]\d{8}`）、必填字段 | `validators.check_approval_numbers` |
+| ③ 医药合规词表 | 根治/治愈/无副作用/最有效/包治/药到病除/立竿见影…→ **流式改写** | `compliance.ComplianceStreamFilter` |
+| ④ 引用存在性 | 正文 `[n]` 必须是 citations 里的 | `validators.check_citation_indices` |
+| ⑤ 免责声明 | 药品类回答必带 | `citations.append_disclaimer` |
+
+两个实现细节值得讲：
+
+- **流式改写要「扣住尾巴」**：token 发出去就收不回，所以可能构成敏感词前缀的字先扣住，
+  命中后替换成合规表述（`根治 → 缓解`）。最长扣 12 字，用户基本感知不到。
+- **否定句不能直接替换**：「更不能说它能根治」换成「…能缓解」意思正好说反。
+  所以先识别「否定词 + 12 字内 + 违禁词」，整句改写成「不能给出绝对化的疗效承诺」。
+- **高危症状前置**：用户说「胸痛 / 呼吸困难 / 大出血」时，回答**开头**就是「立即就医或拨打 120」，
+  再谈药理（`apply_emergency_notice`）。
+
+实测（`这药能根治咽炎吗`）：输出不含「根治」，`guardrail.flags=['compliance_rewritten','disclaimer_injected']`，
+违规项写进 `messages.guardrail`，看板按类别聚合。
+
+### Prompt 版本与灰度
+
+`/admin/prompts` 列出每个 code 的所有版本、状态与灰度比例：
+
+- **切换上线 = 把某个版本设为 `production`**，后端自动把同 code 的其它 production 归档，无需重启；
+- **灰度按 `sha1(user_id) % 100 < rollout`** 命中 testing 版本（同一用户稳定落在同一桶；
+  不用 `hash()` 是因为它带进程级随机种子，重启后灰度会跳）；
+- `resolve` 接口输入任意 `user_key`，直接看到「当前命中哪一版、为什么」，演示灰度不用真安排两个用户；
+- 每轮命中的版本写进 `messages.prompt_version`（如 `drug_consult@v2`），配合看板做版本对比。
+
+### 指标看板
+
+`/admin/observe`：8 张卡 + 合规拦截 + 评估结果 + 最近对话。
+端到端 p95 / p50、对话轮次、拒答率、引用率、转人工率、平均单轮成本、错误率（空回答率）。
+口径写在接口返回的 `definitions` 里（`app/api/admin_observe.py`）——数字和 Langfuse 对不上时先看口径。
+看板**不实时调 Langfuse API**：它慢、会超时，趋势数据业务库足够，深链留给「点过去看单条 trace」。
+
+### 反馈闭环
+
+每条 AI 回答下面有 👍/👎；点 👎 选原因（答非所问 / 引用不对 / 太啰嗦 / 不该拒答），
+写进 `messages.feedback` 并给 Langfuse 打 `user_feedback` 分；
+`GET /api/admin/observe/feedback/export` 导出成 eval_case 候选（问题 / 回答 / 引用 / 原因），
+人工确认后就能进 golden set——「线上问题 → 评估集」的闭环。
+
+### 压测
+
+```powershell
+$env:CHAT_RATE_LIMIT_PER_MINUTE="999"   # 默认 20 次/分钟/人，压测前先放开
+.venv/Scripts/python -X utf8 script/loadtest.py --n 50 --c 50
+```
+
+本机实测（**5 并发、20 请求**）：20/20 成功，首字 p50/p95 = 7.0s/9.0s，端到端 p50/p95 = 8.0s/10.6s。
+比单请求（4~5s）差，瓶颈在**外部模型 API 的吞吐/限流**，不是应用层（路由 + 检索 ≈ 1s）。
+50 并发没有跑：会触发模型侧限流，测出来只会是 429。所以 README 不写「p95 ≤6s 已达成」——
+那是 PRD 目标，实测口径要如实写。
+
+### 演示前重置 / Langfuse 数据集
+
+| 命令 | 作用 |
+| --- | --- |
+| `python script/reset_demo.py` | 清会话 / 消息 / 工单 / 记忆 / 检查点 + 删 `hhyy_memory`（**不动**知识库 / 账号 / Agent 配置） |
+| `python script/upload_dataset.py` | 把 golden set 传成 Langfuse Dataset（幂等） |
+| `python script/upload_dataset.py --run --limit 10` | 传完后跑一次 experiment，Langfuse 里可两次 run 并排对比指标与成本 |
+
+完整的 8 分钟演示流程见 [`docs/演示脚本.md`](docs/演示脚本.md)。
 
 ---
 
