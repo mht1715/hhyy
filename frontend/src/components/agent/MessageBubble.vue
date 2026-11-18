@@ -2,6 +2,7 @@
 import {computed} from 'vue'
 import {marked} from 'marked'
 import ContributorTags from './ContributorTags.vue'
+import FeedbackBar from './FeedbackBar.vue'
 
 const props = defineProps({
   message: {type: Object, required: true}
@@ -94,8 +95,18 @@ const showBubble = computed(() => {
     || stopped.value
 })
 
+// M4：只对「生成完成 + 有服务端消息 id」的 AI 回复开放反馈
+// （message_id 为空说明这条没落库，后端 404；人工客服的话也不该被评价）
+const showFeedback = computed(() => (
+  !isUser.value
+  && !isHumanAgent.value
+  && props.message.status === 'done'
+  && !!props.message.messageId
+))
+
 const showFooter = computed(() => (
-  isAssistant.value && !silenced.value && (contributors.value.length > 0 || stopped.value)
+  isAssistant.value && !silenced.value
+  && (contributors.value.length > 0 || stopped.value || showFeedback.value)
 ))
 
 const handleContentClick = (event) => {
@@ -143,6 +154,11 @@ const handleContentClick = (event) => {
         <div v-if="showFooter" class="bubble-footer">
           <ContributorTags v-if="contributors.length" :contributors="contributors"/>
           <span v-if="stopped" class="stopped-text">已停止生成</span>
+          <FeedbackBar
+              v-if="showFeedback"
+              :message-id="message.messageId"
+              :feedback="message.feedback"
+          />
         </div>
       </div>
     </template>

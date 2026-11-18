@@ -51,6 +51,19 @@ const routes = [
         component: () => import('../views/admin/KbDetailView.vue'),
         meta: {requiresAuth: true, role: 'admin'}
     },
+    // M4：观测与评估看板 + Prompt 版本管理（仅 admin）
+    {
+        path: '/admin/observe',
+        name: 'AdminObserve',
+        component: () => import('../views/admin/ObserveView.vue'),
+        meta: {requiresAuth: true, role: 'admin'}
+    },
+    {
+        path: '/admin/prompts',
+        name: 'AdminPrompts',
+        component: () => import('../views/admin/PromptView.vue'),
+        meta: {requiresAuth: true, role: 'admin'}
+    },
     {
         path: '/doctor',
         name: 'Doctor',

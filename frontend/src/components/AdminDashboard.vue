@@ -1,6 +1,6 @@
 <script setup>
 import {useRouter} from 'vue-router'
-import {Users, ShoppingCart, MessageSquare, TrendingUp, Settings, Database, ShieldCheck, Search} from 'lucide-vue-next'
+import {Users, ShoppingCart, MessageSquare, TrendingUp, Settings, Database, ShieldCheck, Search, Activity, FileCode2} from 'lucide-vue-next'
 
 const router = useRouter()
 // 模拟数据看板
@@ -83,6 +83,14 @@ const recentOrders = [
           <button class="action-btn" @click="router.push('/admin/kb/search-test')">
             <Search :size="18"/>
             检索测试台
+          </button>
+          <button class="action-btn" @click="router.push('/admin/observe')">
+            <Activity :size="18"/>
+            观测与评估
+          </button>
+          <button class="action-btn" @click="router.push('/admin/prompts')">
+            <FileCode2 :size="18"/>
+            Prompt 版本
           </button>
           <button class="action-btn" @click="router.push('/products')">
             <Database :size="18"/>
