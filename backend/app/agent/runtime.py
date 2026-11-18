@@ -30,6 +30,7 @@ from typing import Any, AsyncIterator, Optional, Sequence
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
+from app.agent.checkpointer import thread_config
 from app.agent.registry import AgentConfig, AgentRegistry, get_agent_registry
 from app.agent.router import RouteDecision, RouteError, decide_route
 from app.agent.sse import SSEEvent, error_event
@@ -43,7 +44,10 @@ from app.agent.subagent import (
 from app.core.config import settings
 from app.guardrail.citations import CitationStreamFilter, finalize, needs_disclaimer
 from app.llm.client import get_chat_client
+from app.memory.inject import InjectedMemory, load_memory
+from app.models.agent import Conversation
 from app.rag.citation import refusal_text
+from app.services import handoff as handoff_service
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +81,8 @@ class TurnRequest:
     product_id: Any = None
     order_id: Any = None
     history: list[dict[str, str]] = field(default_factory=list)
+    # 更早对话的滚动摘要（M3-02）：和 history 一起拼进 prompt
+    summary: str = ""
 
 
 @dataclass(slots=True)
@@ -94,6 +100,16 @@ class TurnContext:
     # AsyncSession 不是并发安全的，两个子 Agent 同时 commit/rollback 会抛
     # IllegalStateChangeError，而且这类错误只在「两个 @ 同时命中」时出现，最难复现。
     session_factory: Any = None
+    # M3-01：由 API 层显式传入（测试不传就不会去连 PG）
+    checkpointer: Any = None
+    # M3-03~06：已加载的长期记忆（API 层或路由节点填）
+    memory: Optional[InjectedMemory] = None
+    # 会话状态（bot_active / handoff_pending / human_active / closed）
+    status: str = "bot_active"
+    # API 层预检到的敏感场景：进流前就已建好工单，保证「3 秒内坐席可见」
+    pre_handoff: Optional[dict[str, Any]] = None
+    # 指代消解后的「当前问题」：路由 / 检索 / 子 Agent 都用它，用户原话仍按 request.message 落库
+    query: str = ""
 
     # 图节点写、API 层读
     route: Optional[RouteDecision] = None
@@ -174,11 +190,14 @@ class ChatRuntime:
         self.registry = registry or get_agent_registry()
 
     # ------------------------------------------------------------------ 图
-    def build_graph(self, ctx: TurnContext):
-        """构建编排图。
+    def build_graph(self, ctx: TurnContext, *, checkpointer: Any = None):
+        """构建并编译编排图。
 
         用闭包持有 ``ctx``（里面是 AsyncSession 等不可序列化依赖），``state`` 只留
-        业务字段——M3 加 checkpointer 时不需要动节点签名。
+        业务字段——checkpointer 只序列化 ``AgentState``，所以它拿到的东西都是纯数据。
+
+        ``checkpointer`` 由 API 层传入：测试不传就编译成无持久化的图，
+        不会去连 Postgres（单测不该依赖外部服务）。
         """
         graph = StateGraph(AgentState)
 
@@ -215,7 +234,7 @@ class ChatRuntime:
         graph.add_edge("dispatch", "compose")
         graph.add_edge("compose", "guardrail")
         graph.add_edge("guardrail", END)
-        return graph.compile()
+        return graph.compile(checkpointer=checkpointer)
 
     # ------------------------------------------------------------------ 节点
     async def _route_node(self, state: AgentState, ctx: TurnContext) -> AgentState:
@@ -227,6 +246,20 @@ class ChatRuntime:
             raise RouteError("FORBIDDEN_AGENT", f"当前身份无权使用 {primary.name}")
 
         agents = await self.registry.all(ctx.db)
+
+        # 指代消解：「这个药怎么购买」这种句子先补全成自包含的问题。
+        # 注意**只用于检索和子 Agent 的当前问题**，路由仍用原话 + 历史：
+        # 实测改写句会让 supervisor 的置信度反而略降（0.62 → 0.55），
+        # 用它去路由会把「本来能答」的问题变成澄清。
+        from app.agent.contextual import needs_contextualize, rewrite_query
+
+        query = request.message
+        if ctx.route_llm is not None and needs_contextualize(request.message, request.history):
+            rewritten = await rewrite_query(request.message, request.history, ctx.route_llm)
+            if rewritten:
+                query = rewritten
+        ctx.query = query
+
         decision = await decide_route(
             message=request.message,
             mentions=request.mentions,
@@ -234,9 +267,38 @@ class ChatRuntime:
             registry=agents,
             primary=primary,
             llm=ctx.route_llm,
+            # 路由也要看上下文：否则「这个药怎么购买」这种指代句会被判成「指向不明确」→ clarify
+            history=request.history,
         )
         ctx.route = decision
-        ctx.emit("route", decision.as_event_data())
+        route_payload = decision.as_event_data()
+        if query != request.message:
+            # 让前端 DEV 面板能看到「检索实际用的查询」，排查上下文问题不用猜
+            route_payload["rewritten"] = query
+        ctx.emit("route", route_payload)
+
+        # 长期记忆：只加载一次，注入给所有子 Agent（并行时各查一次既慢又可能不一致）
+        if ctx.memory is None and request.user_id and settings.memory_enabled:
+            from app.memory.semantic import get_semantic_memory
+
+            ctx.memory = await load_memory(
+                ctx.db,
+                user_id=request.user_id,
+                query=ctx.query or request.message,
+                limit=settings.memory_inject_limit,
+                semantic=get_semantic_memory(),
+            )
+        if ctx.memory is not None and ctx.memory.enabled:
+            ctx.emit("memory", ctx.memory.as_event())
+
+        # 敏感场景的工单在进流之前就建好了（API 层预检），这里只负责告知前端
+        if ctx.pre_handoff:
+            ctx.handoff = ctx.pre_handoff
+            ctx.status = "handoff_pending"
+            if ctx.pre_handoff.get("status") == "assigned":
+                ctx.status = "human_active"
+            ctx.emit("handoff", ctx.pre_handoff)
+
         return {
             "route": decision.as_event_data(),
             "mentions": request.mentions,
@@ -260,7 +322,7 @@ class ChatRuntime:
                     prepare_subagent(
                         db=adb,
                         agent=agent,
-                        message=request.message,
+                        message=ctx.query or request.message,
                         role=request.role,
                         user_id=request.user_id,
                         conversation_id=request.conversation_id,
@@ -268,6 +330,9 @@ class ChatRuntime:
                         order_id=request.order_id,
                         retrieval=ctx.retrieval,
                         history=request.history,
+                        summary=request.summary,
+                        memory_block=ctx.memory.block if ctx.memory else "",
+                        memory_items=ctx.memory.items if ctx.memory else None,
                         on_event=ctx.emit,
                     ),
                     timeout=timeout,
@@ -317,7 +382,13 @@ class ChatRuntime:
 
         ctx.drafts = drafts
         ctx.results = results
-        return {"drafts": drafts, "results": results}
+        # 只把「给下一轮/给排障看」的最小信息放进 state（drafts/results 是对象，
+        # 进 checkpointer 要么依赖未注册的类型、要么把 AsyncSession 一起拖进去）
+        return {
+            "agents": [
+                {"code": draft.agent.code, "name": draft.agent.name} for draft in drafts
+            ]
+        }
 
     def _agent_session(self, ctx: TurnContext) -> Any:
         if ctx.session_factory is not None:
@@ -386,7 +457,7 @@ class ChatRuntime:
                     messages, ctx, valid={c["index"] for c in merged}, max_tokens=700
                 )
                 return {
-                    "messages": messages,
+                    "messages": [{"role": "assistant", "content": ctx.answer}],
                     "citations": merged,
                     "contributors": ctx.contributors,
                 }
@@ -398,7 +469,11 @@ class ChatRuntime:
             answer += f"\n\n> 以上结论分别来自 {names}；涉及用药与售后两件事时，请以各自主管助手的答复为准。"
             ctx.emit("delta", {"text": answer})
             ctx.answer = answer
-            return {"messages": [], "citations": merged, "contributors": ctx.contributors}
+            return {
+                "messages": [{"role": "assistant", "content": answer}],
+                "citations": merged,
+                "contributors": ctx.contributors,
+            }
 
         draft = ctx.drafts[0] if ctx.drafts else None
         if draft is None:
@@ -433,7 +508,10 @@ class ChatRuntime:
                 "elapsed_ms": int((time.perf_counter() - ctx.started_at) * 1000),
             },
         )
-        return {"messages": draft.messages, "citations": draft.citations}
+        return {
+            "messages": [{"role": "assistant", "content": ctx.answer}],
+            "citations": draft.citations,
+        }
 
     async def _stream_answer(
         self,
@@ -447,8 +525,12 @@ class ChatRuntime:
         guard = CitationStreamFilter(valid)
         pieces: list[str] = []
         try:
+            from app.observability.tracing import get_trace_sink
+
             llm = _llm_for(ctx, max_tokens=max_tokens)
-            async for chunk in llm.astream(messages):
+            async for chunk in llm.astream(
+                messages, config={"callbacks": get_trace_sink().callbacks()}
+            ):
                 text = str(getattr(chunk, "content", "") or "")
                 if not text:
                     continue
@@ -485,7 +567,9 @@ class ChatRuntime:
         ctx.answer = outcome.text
         ctx.guardrail = {"passed": outcome.passed, "flags": outcome.flags}
 
-        # 转人工：escalate_human 工具（敏感词/模型自决）触发，M3 才真正建工单
+        # 转人工：模型调了 escalate_human（敏感词也会走到这里）→ 真正建工单。
+        # 敏感场景的更早期路径在 API 层预检（ctx.pre_handoff），那条路径能保证
+        # 「用户刚说完投诉、坐席端 1 秒内就能看到」，不用等模型写完回答。
         requested_handoff = any(
             call.get("suggested_action")
             for draft in ctx.drafts
@@ -494,8 +578,33 @@ class ChatRuntime:
         if requested_handoff and not ctx.suggested_actions:
             ctx.suggested_actions = [{"type": "handoff", "label": "转人工客服"}]
         if requested_handoff and ctx.handoff is None:
-            ctx.handoff = {"ticket_id": None, "queue_position": 0, "reason": "建议人工跟进"}
-            ctx.emit("handoff", ctx.handoff)
+            ctx.handoff = await self._create_handoff(
+                ctx, trigger="agent_tool", reason="助手请求人工跟进"
+            )
+            if ctx.handoff:
+                ctx.emit("handoff", ctx.handoff)
+
+        # 「建议转人工」两档（连续拒答 / 连续负面情绪）：只给按钮，不替用户建单
+        if ctx.handoff is None:
+            suggestion = handoff_service.suggest_trigger(
+                [
+                    item.get("content", "")
+                    for item in ctx.request.history
+                    if item.get("role") == "user"
+                ]
+                + [ctx.request.message],
+                [
+                    item.get("content", "")
+                    for item in ctx.request.history
+                    if item.get("role") == "assistant"
+                ]
+                + [ctx.answer],
+            )
+            if suggestion:
+                label = handoff_service.TRIGGER_LABELS.get(suggestion, "转人工客服")
+                ctx.suggested_actions = [
+                    {"type": "handoff", "label": "转人工客服", "reason": label}
+                ]
 
         ctx.emit(
             "done",
@@ -507,6 +616,10 @@ class ChatRuntime:
                 "guardrail": ctx.guardrail,
                 "suggested_actions": ctx.suggested_actions,
                 "replayed": False,
+                "status": ctx.status,
+                "ticket": ctx.handoff,
+                "silenced": False,
+                "memory_used": len(ctx.memory.items) if ctx.memory else 0,
             },
         )
         return {
@@ -517,18 +630,123 @@ class ChatRuntime:
             "suggested_actions": ctx.suggested_actions,
         }
 
+    async def _create_handoff(
+        self,
+        ctx: TurnContext,
+        *,
+        trigger: str,
+        reason: str,
+        risk_flags: Optional[list[str]] = None,
+    ) -> Optional[dict[str, Any]]:
+        """建单并**立刻提交**。
+
+        为什么在流里 commit：坐席工作台是另一个请求在看这张表，不提交就看不到——
+        否则「3 秒内出现待接入」这条验收永远过不了（回答可能还要再写 3 秒）。
+        这里的 session 是流式端点自己开的那个，提交不会影响别的请求。
+        """
+        conversation = None
+        if ctx.request.conversation_id:
+            conversation = await ctx.db.get(Conversation, ctx.request.conversation_id)
+        if conversation is None:
+            # 没有真实会话（单测 / 匿名调试）：只发意图，不建单
+            return {
+                "ticket_id": None,
+                "queue_position": 0,
+                "queue_expires_in": 0,
+                "reason": reason,
+                "trigger": trigger,
+                "status": "queued",
+            }
+        try:
+            summary = handoff_service.build_summary(
+                conversation,
+                self._summary_messages(ctx),
+                risk_flags=risk_flags or [],
+                trigger=trigger,
+                reason=reason,
+            )
+            ticket, _created = await handoff_service.request_handoff(
+                ctx.db,
+                conversation=conversation,
+                user_id=ctx.request.user_id,
+                reason=reason,
+                trigger=trigger,
+                risk_flags=risk_flags,
+                summary=summary,
+            )
+            await ctx.db.commit()
+        except Exception as exc:  # noqa: BLE001 —— 建单失败不该让整轮回答失败
+            logger.warning("创建转人工工单失败：%s", exc)
+            await ctx.db.rollback()
+            return None
+
+        ctx.status = (
+            "human_active" if ticket.status == "assigned" else "handoff_pending"
+        )
+        return handoff_service.ticket_payload(ticket)
+
+    def _summary_messages(self, ctx: TurnContext) -> list[Any]:
+        """把 history + 本轮消息包成 ``build_summary`` 认识的形状。"""
+        from types import SimpleNamespace
+
+        rows: list[Any] = [
+            SimpleNamespace(
+                role=item.get("role", "user"),
+                content=str(item.get("content") or ""),
+                citations=[],
+                tool_calls=[],
+            )
+            for item in ctx.request.history
+            if item.get("content")
+        ]
+        rows.append(
+            SimpleNamespace(
+                role="user",
+                content=ctx.request.message,
+                citations=[],
+                tool_calls=[],
+            )
+        )
+        rows.append(
+            SimpleNamespace(
+                role="assistant",
+                content=ctx.answer,
+                citations=ctx.citations,
+                tool_calls=[call for draft in ctx.drafts for call in draft.tool_calls],
+            )
+        )
+        return rows
+
     # ------------------------------------------------------------------ 入口
     async def run_turn(self, ctx: TurnContext) -> AsyncIterator[SSEEvent]:
-        """跑完一轮，逐个吐事件。异常统一转成 ``error`` 事件（不会抛出）。"""
-        graph = self.build_graph(ctx)
+        """跑完一轮，逐个吐事件。异常统一转成 ``error`` 事件（不会抛出）。
+
+        ``durability="exit"``：每轮只在结束时写一次 checkpoint。默认策略是每个
+        节点都写一次（一轮 5 次），对「按会话恢复」这个目标没有额外价值，却让
+        checkpointer 表随对话量线性膨胀。
+        """
+        checkpointer = ctx.checkpointer
+        graph = self.build_graph(ctx, checkpointer=checkpointer)
         state: AgentState = {
             "message": ctx.request.message,
             "mentions": ctx.request.mentions,
             "role": ctx.request.role,
             "primary_code": ctx.request.agent_code,
+            "messages": [{"role": "user", "content": ctx.request.message}],
         }
+        config = (
+            thread_config(ctx.request.conversation_id)
+            if checkpointer is not None and ctx.request.conversation_id
+            else None
+        )
         try:
-            async for payload in graph.astream(state, stream_mode="custom"):
+            stream = graph.astream(
+                state,
+                config,
+                stream_mode="custom",
+                durability="exit" if config is not None else None,
+            )
+            async for payload in stream:
                 if not isinstance(payload, dict):
                     continue
                 event = str(payload.get("event") or "")

@@ -89,18 +89,41 @@ def resolve_mentions(
     return resolved[:MAX_TARGETS]
 
 
-def build_supervisor_prompt(message: str, candidates: Sequence[AgentConfig]) -> str:
+def build_supervisor_prompt(
+    message: str,
+    candidates: Sequence[AgentConfig],
+    history: Sequence[Mapping[str, Any]] | None = None,
+) -> str:
     catalogue = "\n".join(
         f"- {agent.code}：{agent.name} —— {agent.description or '（无描述）'}" for agent in candidates
     )
+    # 只带最近几轮、只截前 120 字：路由是「选谁」，不是「答题」，
+    # 给太多历史反而让模型把上下文当问题本身
+    recent = ""
+    if history:
+        lines = []
+        for item in list(history)[-6:]:
+            content = str(item.get("content") or "").strip()
+            if not content:
+                continue
+            who = "用户" if item.get("role") == "user" else "助手"
+            lines.append(f"{who}：{content[:120]}")
+        if lines:
+            recent = (
+                "【最近对话】（用来理解「这个药 / 它 / 刚才那个」这类指代）\n"
+                + "\n".join(lines)
+                + "\n\n"
+            )
     return (
         "你是「花红药业」在线客服系统的路由。根据用户的问题，从候选 Agent 中挑 1~2 个最合适的。\n"
         "判断依据：问题涉及药品用法/禁忌 → 药品类 Agent；涉及订单/退款/物流 → 订单类 Agent；"
         "涉及公司信息或客服流程 → 对应 Agent。\n"
+        "如果用户这句话里有指代（这个药、它、刚才说的…），结合【最近对话】判断指的是什么，"
+        "**不要因为句子本身短、指代不清就降低置信度**；只有连最近对话也判断不出时才给低分。\n"
         "只输出 JSON，不要解释，不要 markdown 代码块：\n"
         '{"agents":[{"code":"<候选里出现的 code>","confidence":0.0}],"confidence":0.0,"rationale":"一句话"}\n'
         "confidence 取 0~1：完全不确定就给低分，不要为了「显得有用」而乱选。\n\n"
-        f"候选 Agent：\n{catalogue}\n\n用户问题：{message}"
+        f"候选 Agent：\n{catalogue}\n\n{recent}用户问题：{message}"
     )
 
 
@@ -130,6 +153,7 @@ async def decide_route(
     primary: AgentConfig,
     llm: Any | None = None,
     confidence_floor: float | None = None,
+    history: Sequence[Mapping[str, Any]] | None = None,
 ) -> RouteDecision:
     """路由入口。``llm`` 为空时一律走显式路由/主 Agent（测试与降级用）。"""
     if mentions:
@@ -158,7 +182,7 @@ async def decide_route(
 
     floor = settings.supervisor_confidence_floor if confidence_floor is None else confidence_floor
     try:
-        response = await llm.ainvoke(build_supervisor_prompt(message, candidates))
+        response = await llm.ainvoke(build_supervisor_prompt(message, candidates, history))
         decision = parse_decision(str(getattr(response, "content", "") or ""))
     except Exception as exc:  # noqa: BLE001 —— 路由失败不该让整轮对话失败
         logger.warning("supervisor 路由解析失败，回退主 Agent：%s", exc)

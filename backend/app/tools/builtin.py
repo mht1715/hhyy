@@ -28,7 +28,6 @@ from typing import Any, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.models.agent import Conversation
 from app.models.kb import KbStatus, KnowledgeBase
 from app.models.order import Order, OrderItem
 from app.models.product import Product
@@ -316,25 +315,50 @@ async def order_lookup(
 async def remember(
     ctx: ToolContext, content: str, key: Optional[str] = None
 ) -> dict[str, Any]:
+    """写入长期记忆（M3-04）：走 ``MemoryStore``，不再是会话级的临时 notes。
+
+    三条约束：
+    1. 先看用户开关——关掉记忆后连显式「记住…」也不写（PRD FR6.6）；
+    2. PII 先脱敏再入库（手机号/身份证/详细地址）；
+    3. 失败只回 ``ok=False``，不要因为记忆写不进去影响这轮回答。
+    """
     if not ctx.user_id:
         raise ToolError("AUTH_REQUIRED", "写记忆需要先登录")
     text = " ".join(str(content or "").split())[:500]
     if not text:
         raise ToolError("BAD_ARGS", "content 不能为空")
 
-    note = {"content": text, "key": key, "at": datetime.now(timezone.utc).isoformat()}
+    from app.memory.base import MemoryItem
+    from app.memory.extractor import classify, redact_pii
+    from app.memory.long_term import PgMemoryStore
 
-    if ctx.conversation_id:
-        conversation = await ctx.db.get(Conversation, ctx.conversation_id)
-        if conversation is not None:
-            context = dict(conversation.context or {})
-            notes = list(context.get("notes") or [])
-            notes.append(note)
-            context["notes"] = notes[-20:]
-            conversation.context = context
-            await ctx.db.commit()
+    store = PgMemoryStore(ctx.db)
+    profile = await store.get_profile(ctx.user_id)
+    if not profile.enabled:
+        raise ToolError("MEMORY_DISABLED", "用户已关闭记忆功能，本条不保存")
 
-    return {"_summary": f"已记录：{text[:24]}", "saved": True, "note": note}
+    safe, pii_hits = redact_pii(text)
+    kind = classify(safe)
+    item = MemoryItem(
+        id="",
+        user_id=str(ctx.user_id),
+        type=kind,
+        content=safe[:200],
+        confidence=0.95,
+        sensitive=kind == "risk",
+        source_conversation_id=str(ctx.conversation_id) if ctx.conversation_id else None,
+    )
+    memory_id = await store.add(item)
+    await ctx.db.commit()
+
+    return {
+        "_summary": f"已记录：{safe[:24]}",
+        "saved": True,
+        "memory_id": memory_id,
+        "type": kind,
+        "redacted": bool(pii_hits),
+        "key": key,
+    }
 
 
 @register_tool(

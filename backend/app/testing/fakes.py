@@ -8,7 +8,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Any, AsyncIterator, Iterator, Sequence
 
-from app.memory.base import MemoryItem
+from app.memory.base import MemoryItem, MemoryProfile
 from app.observability.base import ObservationType, TraceContext
 from app.rag.base import RetrievalResult, RetrievedChunk
 
@@ -151,6 +151,8 @@ class FakeMemoryStore:
 
     def __init__(self) -> None:
         self._items: dict[str, MemoryItem] = {}
+        self._profiles: dict[str, MemoryProfile] = {}
+        self.vectors: list[Any] = []
 
     async def add(self, item: MemoryItem) -> str:
         self._items[item.id] = item
@@ -175,6 +177,16 @@ class FakeMemoryStore:
         for key in targets:
             del self._items[key]
         return len(targets)
+
+    async def get_profile(self, user_id: str) -> MemoryProfile:
+        profile = self._profiles.get(str(user_id))
+        return profile or MemoryProfile(user_id=str(user_id), enabled=True)
+
+    async def set_enabled(self, user_id: str, enabled: bool) -> bool:
+        profile = await self.get_profile(user_id)
+        profile.enabled = bool(enabled)
+        self._profiles[str(user_id)] = profile
+        return profile.enabled
 
 
 class FakeTraceSink:

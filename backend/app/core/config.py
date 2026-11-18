@@ -58,6 +58,26 @@ class Settings(BaseSettings):
     memory_collection: str = "hhyy_memory"
     memory_enabled: bool = True
     memory_ttl_days: int = 180
+    # 每次注入 prompt 的记忆条数（PRD FR6.5 的 top 3）
+    memory_inject_limit: int = 3
+    # 关闭后连抽取都不跑（省一次后台模型调用）；用户级开关在 user_profiles.memory_enabled
+    memory_extract_enabled: bool = True
+    # 短期记忆：原文保留轮数 + token 预算（PRD FR6.1 / §13）
+    memory_window_turns: int = 10
+    memory_history_budget: int = 1500
+
+    # --- LangGraph checkpointer（M3-01）---
+    # 关掉后图状态不落库（对话仍可用，只是重启后没有图上下文）
+    checkpointer_enabled: bool = True
+
+    # --- 人工介入 ---
+    handoff_queue_timeout: int = 90
+    # 连续 N 次拒答 / N 轮负面情绪 → 建议转人工（PRD FR5.1）
+    handoff_refusal_streak: int = 2
+    # WebSocket 短期 ticket 有效期（先 HTTP 拿 ticket，再连 WS）
+    ws_ticket_ttl: int = 60
+    # 服务端心跳间隔：客户端 90s 收不到任何帧就该重连
+    ws_heartbeat_seconds: int = 25
 
     # --- 多 Agent / 对话（M2）---
     # Agent 配置缓存 TTL：后台改完会主动失效，这个 TTL 只是多 worker 下的兜底
@@ -70,8 +90,10 @@ class Settings(BaseSettings):
     chat_idempotency_seconds: int = 300
     # 带进 prompt 的历史轮数（一问一答算一轮）
     chat_history_turns: int = 6
-    # supervisor 置信度低于该值时先澄清/给转人工（PRD FR1.4）
-    supervisor_confidence_floor: float = 0.6
+    # supervisor 置信度低于该值时先澄清/给转人工（PRD FR1.4）。
+    # 0.5 是实测校准值：小模型对「这个药怎么购买」这种短句常给 0.55~0.65，
+    # 定 0.6 会把本来能答的问题变成一句「请问你问的是哪一类」。
+    supervisor_confidence_floor: float = 0.5
     # 关闭后所有「没有 @ 的提问」都直连主 Agent（省一次模型调用，但多 Agent 就没入口了）
     supervisor_enabled: bool = True
     # 多 Agent 汇总是否再花一次模型调用做「语言融合」。默认关：

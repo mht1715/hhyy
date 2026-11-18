@@ -134,9 +134,12 @@ switch ($Command) {
     }
 
     'backend' {
+        # 走 backend/serve.py 而不是直接 uvicorn：Windows 上 psycopg（checkpointer 的驱动）
+        # 需要 SelectorEventLoop，策略必须在 loop 创建前设置（详见 serve.py 注释）
         Write-Step '启动后端 http://127.0.0.1:8000 （文档 /docs）'
         Push-Location (Join-Path $Root 'backend')
-        try { & $Py -m uvicorn app.main:app --reload --port 8000 } finally { Pop-Location }
+        $env:RELOAD = '1'
+        try { & $Py (Join-Path $Root 'backend\serve.py') } finally { Pop-Location; Remove-Item Env:\RELOAD -ErrorAction SilentlyContinue }
     }
 
     'frontend' {

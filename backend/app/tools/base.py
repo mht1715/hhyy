@@ -16,6 +16,20 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Iterable, Sequence
 
+# 工具名 → 给人看的能力标签（`@` 候选面板、广场卡片、交接摘要都用它）
+TOOL_LABELS: dict[str, str] = {
+    "kb_search": "知识库检索",
+    "policy_search": "售后政策",
+    "product_lookup": "药品查询",
+    "order_lookup": "订单查询",
+    "remember": "记住偏好",
+    "escalate_human": "转人工",
+}
+
+
+def tool_label(name: str) -> str:
+    return TOOL_LABELS.get(name, name)
+
 
 @dataclass(slots=True)
 class ToolContext:

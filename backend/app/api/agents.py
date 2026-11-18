@@ -16,19 +16,10 @@ from app.models.user import User
 from app.rag.acl import VISITOR_ROLE
 from app.schemas.agent import AgentCard
 from app.schemas.response import ResponseModel
-from app.tools.base import get_tool
+from app.tools.base import TOOL_LABELS, get_tool
 
 router = APIRouter()
 
-# 工具名 → 给人看的能力标签（`@` 候选面板与广场卡片都用它）
-TOOL_LABELS = {
-    "kb_search": "知识库检索",
-    "policy_search": "售后政策",
-    "product_lookup": "药品查询",
-    "order_lookup": "订单查询",
-    "remember": "记住偏好",
-    "escalate_human": "转人工",
-}
 
 
 def _capabilities(agent: AgentConfig) -> list[str]:

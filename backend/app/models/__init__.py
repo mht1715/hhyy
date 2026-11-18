@@ -20,6 +20,7 @@ from app.models.agent import (
 )
 from app.models.base import Base
 from app.models.cart import CartItem
+from app.models.handoff import HandoffTicket, HandoffTrigger, TicketStatus
 from app.models.kb import (
     AuditLog,
     ChunkStrategy,
@@ -33,6 +34,7 @@ from app.models.kb import (
     KbVisibility,
     KnowledgeBase,
 )
+from app.models.memory import MemoryType, UserMemory, UserProfile
 from app.models.order import Order, OrderItem
 from app.models.product import Product
 from app.models.user import User, UserRole
@@ -48,6 +50,8 @@ __all__ = [
     "ConversationStatus",
     "DocumentSource",
     "DocumentStatus",
+    "HandoffTicket",
+    "HandoffTrigger",
     "KbChunk",
     "KbDocument",
     "KbRolePermission",
@@ -55,6 +59,7 @@ __all__ = [
     "KbStatus",
     "KbVisibility",
     "KnowledgeBase",
+    "MemoryType",
     "Message",
     "MessageRole",
     "Order",
@@ -62,7 +67,10 @@ __all__ = [
     "Product",
     "PromptStatus",
     "PromptTemplate",
+    "TicketStatus",
     "UiMode",
     "User",
+    "UserMemory",
+    "UserProfile",
     "UserRole",
 ]

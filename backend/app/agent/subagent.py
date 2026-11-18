@@ -26,14 +26,13 @@ from sqlalchemy import select
 from app.agent.registry import AgentConfig
 from app.guardrail.citations import DISCLAIMER, needs_disclaimer
 from app.llm.client import get_chat_client
+from app.memory.extractor import has_explicit_trigger
 from app.models.agent import PromptStatus, PromptTemplate
 from app.rag.citation import refusal_text
+from app.services.handoff import SENSITIVE_WORDS
 from app.tools.base import ToolContext, ToolResult, call_tool
 
 logger = logging.getLogger(__name__)
-
-# 一出现就该转人工的强敏感词（M3 会把这套规则搬到 services/handoff.py）
-SENSITIVE_WORDS = ("投诉", "起诉", "赔偿", "医疗纠纷", "过量", "自杀", "维权", "曝光", "律师")
 
 DEFAULT_PROMPT = """你是「{agent_name}」。{description}
 
@@ -185,6 +184,27 @@ def _tool_event(agent: AgentConfig, result: ToolResult) -> dict[str, Any]:
     }
 
 
+def _history_messages(history: Optional[list[dict[str, Any]]]) -> list[dict[str, str]]:
+    """把会话历史转成 chat 消息。
+
+    ``human_agent`` 不是合法的 chat role：转成 assistant 并打上「人工客服」前缀，
+    否则模型会以为那是自己说过的话，或者干脆忽略（坐席结束会话后 AI 要接着聊）。
+    """
+    out: list[dict[str, str]] = []
+    for item in history or []:
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+        role = item.get("role")
+        if role == "human_agent":
+            out.append({"role": "assistant", "content": f"【人工客服】{content}"})
+        elif role in {"user", "assistant"}:
+            out.append({"role": role, "content": content})
+        else:
+            out.append({"role": "assistant", "content": content})
+    return out
+
+
 async def prepare_subagent(
     *,
     db: Any,
@@ -197,9 +217,17 @@ async def prepare_subagent(
     order_id: Any = None,
     retrieval: Any = None,
     history: Optional[list[dict[str, str]]] = None,
+    summary: str = "",
+    memory_block: str = "",
+    memory_items: Optional[list[Any]] = None,
     on_event: Optional[Any] = None,
 ) -> SubAgentDraft:
-    """跑工具、拼上下文。``on_event`` 是同步回调，用来即时发 ``tool``/``retrieval`` 事件。"""
+    """跑工具、拼上下文。``on_event`` 是同步回调，用来即时发 ``tool``/``retrieval`` 事件。
+
+    ``summary`` 是滚动摘要（更早的对话），``memory_block`` 是长期记忆。
+    两者都由运行时统一取一次再传给各子 Agent——不能每个子 Agent 自己查：
+    两个 ``@`` 并行时会重复读库，而且可能出现「A 看到了记忆、B 没看到」的不一致。
+    """
     started = time.perf_counter()
     tool_ctx = ToolContext(
         db=db,
@@ -267,9 +295,13 @@ async def prepare_subagent(
             if block:
                 blocks.append(block)
 
-    # 3) 敏感词：先建「转人工」意图，再照常回答（M3 会把工单落库）
+    # 3) 敏感词：先建「转人工」意图，再照常回答（真实工单由运行时/API 层建）
     if "escalate_human" in agent.tools and any(word in message for word in SENSITIVE_WORDS):
         await run("escalate_human", reason="用户问题涉及敏感场景", summary=message[:200])
+
+    # 4) 显式记忆指令（「记住…」）：立即写入并回执，不等异步抽取（PRD FR6.4-4）
+    if "remember" in agent.tools and user_id and has_explicit_trigger(message):
+        await run("remember", content=message)
 
     context_text = "\n\n".join(blocks).strip()
     prompt_template = await load_prompt(db, agent)
@@ -281,6 +313,8 @@ async def prepare_subagent(
             "context": context_text or "（本次没有检索到资料）",
             "today": date.today().isoformat(),
             "role": role,
+            "summary": summary or "（无）",
+            "memory": memory_block or "（无）",
         },
     )
 
@@ -289,18 +323,18 @@ async def prepare_subagent(
         # 重新编号：只有真正拼进上下文的片段才配拥有 [n]
         _, citations = _context_from_chunks(chunks)
 
-    # 职责边界统一在运行时追加，而不是指望每个 prompt 模板都记得写
+    # 摘要 / 记忆 / 职责边界统一在运行时追加，不指望每个 prompt 模板都记得写
+    if summary:
+        system_prompt += f"\n\n【更早的对话摘要】（来自本会话之前的对话）\n{summary}"
+    if memory_block:
+        system_prompt += f"\n\n{memory_block}"
     system_prompt = system_prompt + SCOPE_RULES
 
     draft = SubAgentDraft(
         agent=agent,
         messages=[
             {"role": "system", "content": system_prompt},
-            *[
-                {"role": item.get("role", "user"), "content": str(item.get("content") or "")}
-                for item in (history or [])
-                if item.get("content")
-            ],
+            *_history_messages(history),
             {"role": "user", "content": message},
         ],
         citations=citations,
@@ -315,6 +349,14 @@ async def prepare_subagent(
         draft.refused = True
         draft.reason = str(kb_hits.get("reason") or "no_hit")
         draft.fallback_text = refusal_text(draft.reason)
+        # 有可信记忆时，拒答也要「记得用户」：只复述记忆、不给药品结论（M3-06）。
+        # 什么都不说会显得「刚说过的话你都没记住」，直接答又违反「无依据不猜」。
+        if memory_items:
+            from app.memory.inject import memory_refusal_text
+
+            with_memory = memory_refusal_text(memory_items)
+            if with_memory:
+                draft.fallback_text = with_memory
 
     logger.debug(
         "prepared agent=%s tools=%s chars=%d elapsed=%dms",
@@ -349,7 +391,13 @@ async def generate_subagent(draft: SubAgentDraft, *, llm: Any = None) -> SubAgen
             model=draft.agent.model or None,
             max_tokens=SUBAGENT_MAX_TOKENS,
         )
-        response = await client.ainvoke(draft.messages)
+        # 带上 Langfuse 的 CallbackHandler：否则这一路 generation（含 token/成本）
+        # 不会出现在 trace 里，只剩一个空 span
+        from app.observability.tracing import get_trace_sink
+
+        response = await client.ainvoke(
+            draft.messages, config={"callbacks": get_trace_sink().callbacks()}
+        )
         text = str(getattr(response, "content", "") or "").strip()
     except Exception as exc:  # noqa: BLE001 —— 单路失败由汇总节点降级
         return SubAgentResult(

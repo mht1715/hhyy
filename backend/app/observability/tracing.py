@@ -131,8 +131,13 @@ class LangfuseTraceSink:
             entered = False
             try:
                 if user_id or session_id or tags:
+                    # langfuse 5.x 里 ``propagate_attributes`` 是**模块级函数**，
+                    # 不是 client 的方法（写成 self._client.propagate_attributes 会
+                    # AttributeError，然后整条 trace 静默降级成 no-op——M3 联调时才发现）。
+                    from langfuse import propagate_attributes
+
                     stack.enter_context(
-                        client.propagate_attributes(
+                        propagate_attributes(
                             user_id=user_id,
                             session_id=session_id,
                             tags=tags,

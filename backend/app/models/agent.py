@@ -114,6 +114,10 @@ class Conversation(Base):
         String(24), default=ConversationStatus.BOT_ACTIVE.value, index=True
     )
     context: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    # M3 短期记忆：超出窗口的历史压成摘要（PRD FR6.1）。``summary_upto`` 记录
+    # 「已经浓缩到第几条消息」，避免每轮都重复摘要同一批内容。
+    summary: Mapped[str] = mapped_column(Text, default="")
+    summary_upto: Mapped[int] = mapped_column(Integer, default=0)
 
     messages: Mapped[list["Message"]] = relationship(
         back_populates="conversation", cascade="all, delete-orphan"
