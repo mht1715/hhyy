@@ -1,15 +1,14 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from pydantic import BaseModel
 
 from app.api.deps import AdminOrDoctor
-from app.core.config import settings
+from app.llm.client import LLMNotConfigured, get_chat_client
 from app.models import User
+from app.observability.tracing import get_trace_sink
 from app.schemas.agent_parse import AgentProductParse
 from app.schemas.response import ResponseModel
-import os
 
 router = APIRouter()
 
@@ -20,16 +19,11 @@ class ParseRequest(BaseModel):
 
 @router.post("/parse-product", response_model=ResponseModel[dict])
 async def parse_product(req: ParseRequest, current_user: User = AdminOrDoctor):
-    api_key = settings.deepseek_api_key or os.getenv("DEEPSEEK_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="未配置 DEEPSEEK_API_KEY")
-
-    llm = ChatOpenAI(
-        model=settings.deepseek_chat_model,
-        api_key=api_key,
-        base_url=settings.deepseek_base_url,
-        temperature=0
-    )
+    try:
+        # 温度取 0：结构化抽取要稳定，不要发挥
+        llm = get_chat_client(temperature=0)
+    except LLMNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     parser = JsonOutputParser(pydantic_object=AgentProductParse)
 
@@ -71,8 +65,22 @@ async def parse_product(req: ParseRequest, current_user: User = AdminOrDoctor):
     chain = prompt | llm | parser
 
     try:
-        result = chain.invoke({"text": req.text})
-        result = {k: v for k, v in result.items() if v is not None}
+        # sink 未配置时是 no-op：埋点绝不会影响解析结果
+        sink = get_trace_sink()
+        with sink.trace(
+            "agent.parse_product",
+            user_id=str(current_user.id),
+            tags=["agent:product_parse", f"role:{current_user.role.value}"],
+            metadata={"input_chars": len(req.text)},
+        ) as ctx:
+            # callbacks 为空列表时等价于不传，LangChain 行为不变
+            result = chain.invoke(
+                {"text": req.text},
+                config={"callbacks": sink.callbacks()},
+            )
+            result = {k: v for k, v in result.items() if v is not None}
+            sink.score(ctx, "valid_json", 1.0)
+
         return ResponseModel(data=result)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Agent 解析失败: {str(e)}")

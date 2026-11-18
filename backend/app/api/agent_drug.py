@@ -1,16 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
-from app.core.database import get_db
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import settings
+from app.core.database import get_db
+from app.llm.client import LLMNotConfigured, get_chat_client
 from app.models.product import Product
 from app.schemas.agent_chat import DrugChatRequest
 from app.schemas.response import ResponseModel
-from app.api.deps import AnyUser
-from app.models.user import User
-import os
 
 router = APIRouter()
 
@@ -28,13 +26,10 @@ async def drug_consult(
         raise HTTPException(status_code=404, detail="药品不存在")
 
     # 2. 准备大模型
-    api_key = settings.deepseek_api_key or os.getenv("DEEPSEEK_API_KEY")
-    llm = ChatOpenAI(
-        model=settings.deepseek_chat_model,
-        api_key=api_key,
-        base_url=settings.deepseek_base_url,
-        temperature=0.3
-    )
+    try:
+        llm = get_chat_client(temperature=settings.llm_temperature)
+    except LLMNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     # 3. 核心：构造带有药品说明书的 System Prompt
     # 将药品信息直接作为 Context 塞给大模型，这就是最简单的 RAG

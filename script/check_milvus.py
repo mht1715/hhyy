@@ -1,6 +1,8 @@
 import asyncio
+
 from langchain_core.documents import Document
-from app.services.vector_store import add_documents, search_documents, get_vector_store
+
+from app.services.vector_store import add_documents, get_vector_store, search_documents
 
 
 async def main():
@@ -20,8 +22,8 @@ async def main():
     for doc in results:
         print(f"  - {doc.page_content}")
 
-    # 3. 列出 Collection 验证
-    store = get_vector_store(collection)
+    # 3. 触发一次 get_vector_store，确认 collection 可访问
+    get_vector_store(collection)
     print(f"[Collection] {collection} 已就绪")
 
 

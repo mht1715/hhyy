@@ -1,9 +1,11 @@
 import uuid
-from sqlalchemy import String, Float, Integer, Text
-from sqlalchemy.orm import Mapped, mapped_column
-from pgvector.sqlalchemy import Vector
-from app.models.base import Base
 from typing import Optional
+
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import Float, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.models.base import Base
 
 
 class Product(Base):

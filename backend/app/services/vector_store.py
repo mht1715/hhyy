@@ -1,5 +1,6 @@
-from langchain_milvus import Milvus
 from langchain_core.documents import Document
+from langchain_milvus import Milvus
+
 from app.core.config import settings
 from app.llm.client import get_embedding_client
 

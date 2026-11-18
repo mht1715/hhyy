@@ -1,17 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 from uuid import UUID
 
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.api.deps import AnyUser
 from app.core.database import get_db
 from app.models.cart import CartItem
 from app.models.product import Product
 from app.models.user import User
-from app.schemas.cart import CartAdd, CartResponse, CartItemResponse
+from app.schemas.cart import CartAdd, CartItemResponse, CartResponse
 from app.schemas.response import ResponseModel
-from app.api.deps import AnyUser
 
 router = APIRouter()
 
@@ -44,7 +45,8 @@ async def get_cart(db: AsyncSession = Depends(get_db), current_user: User = AnyU
 async def add_to_cart(data: CartAdd, db: AsyncSession = Depends(get_db), current_user: User = AnyUser):
     # 检查商品是否存在
     prod = await db.get(Product, data.product_id)
-    if not prod: raise HTTPException(404, "商品不存在")
+    if not prod:
+        raise HTTPException(404, "商品不存在")
 
     # 检查购物车是否已有
     result = await db.execute(

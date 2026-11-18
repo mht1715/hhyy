@@ -1,6 +1,7 @@
-from pydantic import BaseModel
+from typing import List, Optional
 from uuid import UUID
-from typing import Optional, List
+
+from pydantic import BaseModel
 
 
 class CartAdd(BaseModel):

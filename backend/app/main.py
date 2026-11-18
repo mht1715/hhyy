@@ -1,10 +1,23 @@
+from contextlib import asynccontextmanager
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from app.api import auth, product, agent, upload, agent_drug, cart, order
 
-app = FastAPI()
+from app.api import agent, agent_drug, auth, cart, order, product, upload
+from app.core.config import settings
+from app.observability.tracing import get_trace_sink
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    # 进程退出前把 Langfuse 缓冲区刷出去；未配置时是空操作
+    get_trace_sink().flush()
+
+
+app = FastAPI(lifespan=lifespan)
 
 # 配置 CORS（允许前端跨域请求）
 app.add_middleware(
@@ -30,7 +43,14 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    """健康检查：同时暴露依赖配置状态，缺凭据时服务仍可用（降级而非崩）。"""
+    return {
+        "status": "ok",
+        "env": settings.app_env,
+        "observability": "enabled" if settings.observability_enabled else "disabled",
+        "llm": "configured" if settings.llm_configured else "missing",
+        "embedding": "configured" if settings.embedding_configured else "missing",
+    }
 
 
 def main():

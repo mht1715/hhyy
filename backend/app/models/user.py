@@ -1,9 +1,16 @@
+import enum
 import uuid
-from sqlalchemy import String, ForeignKey, Enum
+from typing import TYPE_CHECKING
+
+from sqlalchemy import Enum, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
-import enum
+
+if TYPE_CHECKING:
+    # 仅供类型检查；运行时由 SQLAlchemy 按字符串解析，避免循环 import
+    from app.models.cart import CartItem
+    from app.models.order import Order
 
 
 class UserRole(str, enum.Enum):

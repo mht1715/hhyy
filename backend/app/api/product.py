@@ -1,15 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 from uuid import UUID
 
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.auth import get_current_user
 from app.api.deps import AdminOrDoctor
 from app.core.database import get_db
 from app.models.product import Product
-from app.schemas.product import ProductCreate, ProductUpdate, ProductResponse
-from app.schemas.response import ResponseModel
-from app.api.auth import get_current_user
 from app.models.user import User, UserRole
+from app.schemas.product import ProductCreate, ProductResponse, ProductUpdate
+from app.schemas.response import ResponseModel
 
 router = APIRouter()
 

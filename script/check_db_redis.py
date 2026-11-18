@@ -2,9 +2,10 @@ import asyncio
 import sys
 
 import redis.asyncio as aioredis
-from app.core.config import settings
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
+
+from app.core.config import settings
 
 
 async def test_postgres():

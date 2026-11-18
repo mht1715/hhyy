@@ -1,4 +1,5 @@
 import {createRouter, createWebHistory} from 'vue-router'
+import {canAccess, resolveHomePath} from '../utils/permission'
 
 const routes = [
     {
@@ -66,24 +67,23 @@ const router = createRouter({
     routes
 })
 
-// 路由守卫：权限校验
-router.beforeEach((to, from, next) => {
+// 路由守卫：登录态 + 角色校验
+// 同时支持 meta.role（单角色）与 meta.roles（多角色），判断逻辑收敛到 utils/permission
+router.beforeEach((to) => {
     const token = localStorage.getItem('token')
-    const role = localStorage.getItem('role')
+    const role = localStorage.getItem('role') || ''
 
     if (to.meta.requiresAuth && !token) {
-        return next('/')
+        return {path: '/', query: {redirect: to.fullPath}}
     }
 
-    // 支持数组形式的角色校验
-    if (to.meta.roles && !to.meta.roles.includes(role)) {
-        if (role === 'admin') return next('/admin')
-        if (role === 'doctor') return next('/doctor')
-        if (role === 'patient') return next('/patient')
-        return next('/')
+    if (to.meta.requiresAuth && !canAccess(role, to.meta)) {
+        const home = resolveHomePath(role)
+        // 落到自己没有权限的页面会造成死循环，兜底回首页
+        return home === to.path ? {path: '/'} : {path: home}
     }
 
-    next()
+    return true
 })
 
 export default router

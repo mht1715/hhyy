@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta
-import jwt
+
 import bcrypt
+import jwt
+
 from app.core.config import settings
 
 SECRET_KEY = settings.secret_key
