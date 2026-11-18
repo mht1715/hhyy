@@ -24,7 +24,6 @@ pgvector>=0.4.1
 
 # 缓存 (Redis)
 redis[hiredis]>=5.2.1
-booktype
 
 # 认证与安全 (RBAC)
 bcrypt
