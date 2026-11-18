@@ -1,12 +1,15 @@
 <script setup>
-import {ref} from 'vue'
+import {computed, ref} from 'vue'
 import {useAuthStore} from '../store/auth'
-import {useRouter} from 'vue-router'
-import {Hexagon, UserCircle, ChevronDown, LogOut, RefreshCw} from 'lucide-vue-next'
+import {useRoute, useRouter} from 'vue-router'
+import {Bot, Hexagon, UserCircle, ChevronDown, LogOut, RefreshCw} from 'lucide-vue-next'
 
 const auth = useAuthStore()
+const route = useRoute()
 const router = useRouter()
 const isDropdownOpen = ref(false)
+
+const isAgentsActive = computed(() => route.path === '/agents' || route.path.startsWith('/agents/'))
 
 const toggleDropdown = () => {
   if (auth.isLoggedIn) {
@@ -43,6 +46,13 @@ const roleNameMap = {admin: '管理员', doctor: '医生', patient: '患者'}
       <Hexagon color="#ef4444" :size="28" fill="#ef4444"/>
       <span class="brand-name">花红agent（demo）</span>
     </div>
+
+    <nav class="nav-links">
+      <RouterLink to="/agents" class="nav-link" :class="{ active: isAgentsActive }">
+        <Bot :size="16"/>
+        <span>Agent 广场</span>
+      </RouterLink>
+    </nav>
 
     <div class="right-user">
       <div v-if="!auth.isLoggedIn" class="login-btn" @click="auth.isLoginModalOpen = true">
@@ -106,12 +116,44 @@ const roleNameMap = {admin: '管理员', doctor: '医生', patient: '患者'}
     display: flex;
     align-items: center;
     gap: 12px;
+    white-space: nowrap;
 
     .brand-name {
       font-size: 18px;
       font-weight: 700;
       color: #1f2937;
       letter-spacing: 0.5px;
+    }
+  }
+
+  .nav-links {
+    display: flex;
+    align-items: center;
+    margin-left: auto;
+    margin-right: 18px;
+
+    .nav-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      color: #4b5563;
+      font-size: 13px;
+      font-weight: 500;
+      text-decoration: none;
+      white-space: nowrap;
+      transition: background-color 0.2s, color 0.2s;
+
+      &:hover {
+        background: #f9fafb;
+        color: #ef4444;
+      }
+
+      &.active {
+        background: #fef2f2;
+        color: #b91c1c;
+      }
     }
   }
 
@@ -239,11 +281,32 @@ const roleNameMap = {admin: '管理员', doctor: '医生', patient: '患者'}
       gap: 8px !important;
 
       .brand-name {
-        font-size: 16px !important; // 调小 Logo 文字
+        font-size: 15px !important; // 调小 Logo 文字，给广场入口留位置
+      }
+    }
+
+    .nav-links {
+      margin-right: 6px !important;
+
+      .nav-link {
+        gap: 3px !important;
+        padding: 4px 8px !important;
+        font-size: 11px !important;
+
+        svg {
+          width: 14px;
+          height: 14px;
+        }
       }
     }
 
     .right-user {
+      .login-btn {
+        padding: 6px 10px !important;
+        font-size: 12px !important;
+        white-space: nowrap;
+      }
+
       .user-profile {
         .profile-trigger {
           padding: 4px 8px !important;

@@ -1,9 +1,11 @@
 <script setup>
-import {ref, onMounted, nextTick, watch} from 'vue'
-import {Sparkles, Send} from 'lucide-vue-next'
-import {showToast} from 'vant'
-import {marked} from 'marked'
-import {drugConsultApi} from '../../api/agentChat'
+import {computed, nextTick, onMounted, ref, watch} from 'vue'
+import {Sparkles} from 'lucide-vue-next'
+import {fetchAgents} from '../../api/chat'
+import {useAgentChat} from '../../composables/useAgentChat'
+import CitationDrawer from '../agent/CitationDrawer.vue'
+import MentionInput from '../agent/MentionInput.vue'
+import MessageBubble from '../agent/MessageBubble.vue'
 
 const props = defineProps({
   productId: {type: String, required: true},
@@ -17,58 +19,94 @@ const quickQuestions = [
   '和其他药能一起吃吗？'
 ]
 
-const input = ref('')
-const messages = ref([
-  {role: 'ai', text: `您好，我是您的专属AI药师。关于【${props.productName}】的用法、禁忌或适用人群，您可以随时问我。`}
-])
-const loading = ref(false)
-const sessionId = ref('')
-const chatAreaRef = ref(null)
+const greeting = `您好，我是您的专属AI药师。关于【${props.productName}】的用法、禁忌或适用人群，您可以随时问我。`
 
-onMounted(() => {
-  sessionId.value = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString()
+const {
+  messages,
+  streaming,
+  send,
+  stop,
+  retry
+} = useAgentChat({
+  agentCode: 'drug_consult',
+  context: {product_id: props.productId},
+  initialMessages: [{role: 'assistant', content: greeting}]
 })
 
-const renderMarkdown = (text) => {
-  return marked.parse(text)
-}
+const input = ref('')
+const agents = ref([])
+const chatAreaRef = ref(null)
 
-watch(messages, () => {
-  nextTick(() => {
-    if (chatAreaRef.value) {
-      chatAreaRef.value.scrollTop = chatAreaRef.value.scrollHeight
-    }
-  })
-}, {deep: true})
+const citationShow = ref(false)
+const citationList = ref([])
+const citationIndex = ref(null)
 
-// 【修复核心逻辑】
-const sendMessage = async (quickText) => {
-  // 判断是快捷提问（传了字符串）还是手动输入（没传参）
-  const userText = typeof quickText === 'string' ? quickText : input.value;
-
-  // 安全校验，防止 undefined
-  if (!userText || !userText.trim() || loading.value) return
-
-  messages.value.push({role: 'user', text: userText})
-
-  // 如果是手动输入（没有传 quickText），才清空输入框
-  if (typeof quickText !== 'string') {
-    input.value = ''
+const lastAssistant = computed(() => {
+  for (let i = messages.value.length - 1; i >= 0; i -= 1) {
+    if (messages.value[i].role === 'assistant') return messages.value[i]
   }
+  return null
+})
 
-  loading.value = true
+// 流式占位（或空错误气泡）不单独渲染，改用原有的 loading / 错误条
+const visibleMessages = computed(() => {
+  const list = messages.value
+  const last = list[list.length - 1]
+  const isPlaceholder = last
+    && last.role === 'assistant'
+    && !last.content
+    && (last.status === 'streaming' || last.status === 'error')
+  return isPlaceholder ? list.slice(0, -1) : list
+})
 
+const showLoadingBubble = computed(() => (
+  streaming.value
+  && lastAssistant.value
+  && lastAssistant.value.status === 'streaming'
+  && !lastAssistant.value.content
+))
+
+const errorText = computed(() => {
+  const last = lastAssistant.value
+  if (!last || last.status !== 'error') return ''
+  return (last.error && last.error.message) || '抱歉，药师现在有点忙，请稍后再试。'
+})
+
+watch(
+    [messages, streaming],
+    () => {
+      nextTick(() => {
+        if (chatAreaRef.value) {
+          chatAreaRef.value.scrollTop = chatAreaRef.value.scrollHeight
+        }
+      })
+    },
+    {deep: true}
+)
+
+onMounted(async () => {
   try {
-    const res = await drugConsultApi(props.productId, userText, sessionId.value)
-    messages.value.push({role: 'ai', text: res.reply})
+    agents.value = await fetchAgents()
   } catch (e) {
-    messages.value.push({role: 'ai', text: '抱歉，药师现在有点忙，请稍后再试。'})
-  } finally {
-    loading.value = false
+    // 候选列表不影响药品咨询本身
   }
+})
+
+const handleSubmit = ({text, mentions}) => {
+  if (streaming.value) return
+  send(text, {mentions})
 }
 
-const handleSendClick = () => sendMessage()
+const askQuick = (question) => {
+  if (streaming.value) return
+  send(question)
+}
+
+const openCitation = (message, index) => {
+  citationList.value = Array.isArray(message.citations) ? message.citations : []
+  citationIndex.value = index
+  citationShow.value = true
+}
 </script>
 
 <template>
@@ -80,22 +118,39 @@ const handleSendClick = () => sendMessage()
 
     <!-- 聊天记录区 -->
     <div class="chat-area" ref="chatAreaRef">
-      <div v-for="(msg, i) in messages" :key="i" :class="['msg-wrap', msg.role]">
-        <div class="avatar" v-if="msg.role === 'ai'">
+      <div
+          v-for="msg in visibleMessages"
+          :key="msg.id"
+          :class="['msg-wrap', msg.role === 'user' ? 'user' : 'ai']"
+      >
+        <div class="avatar" v-if="msg.role !== 'user'">
           <Sparkles :size="14" color="#fff"/>
         </div>
         <div class="msg-bubble">
-          <!-- 使用 v-html 渲染 Markdown 结果 -->
-          <div class="markdown-body" v-html="renderMarkdown(msg.text)"></div>
+          <MessageBubble
+              :message="msg"
+              @cite="(index) => openCitation(msg, index)"
+          />
         </div>
       </div>
-      <div v-if="loading" class="msg-wrap ai">
+
+      <div v-if="showLoadingBubble" class="msg-wrap ai">
         <div class="avatar">
           <Sparkles :size="14" color="#fff"/>
         </div>
         <div class="msg-bubble loading-bubble">
           <van-loading type="dots" size="20px" color="#ef4444"/>
           <span>正在查阅说明书...</span>
+        </div>
+      </div>
+
+      <div v-if="errorText" class="msg-wrap ai">
+        <div class="avatar">
+          <Sparkles :size="14" color="#fff"/>
+        </div>
+        <div class="msg-bubble error-bubble">
+          <span>{{ errorText }}</span>
+          <button type="button" class="retry-btn" @click="retry">重试</button>
         </div>
       </div>
     </div>
@@ -108,8 +163,8 @@ const handleSendClick = () => sendMessage()
           plain
           type="danger"
           size="medium"
-          class="q-tag"
-          @click="sendMessage(q)"
+          :class="['q-tag', { disabled: streaming }]"
+          @click="askQuick(q)"
       >
         {{ q }}
       </van-tag>
@@ -117,25 +172,23 @@ const handleSendClick = () => sendMessage()
 
     <!-- 输入区 -->
     <div class="input-area">
-      <van-field
+      <MentionInput
           v-model="input"
+          :agents="agents"
+          :disabled="streaming"
+          :streaming="streaming"
           placeholder="输入您想咨询的问题..."
-          @keyup.enter="handleSendClick"
-          :disabled="loading"
-          class="chat-input"
+          class="chat-input-wrap"
+          @submit="handleSubmit"
+          @stop="stop"
       />
-      <van-button
-          type="danger"
-          class="send-btn"
-          :loading="loading"
-          @click="handleSendClick"
-      >
-        <template #icon>
-          <Send :size="16"/>
-        </template>
-        发送
-      </van-button>
     </div>
+
+    <CitationDrawer
+        v-model="citationShow"
+        :citations="citationList"
+        :active-index="citationIndex"
+    />
   </div>
 </template>
 
@@ -209,6 +262,20 @@ const handleSendClick = () => sendMessage()
         font-size: 14px;
         line-height: 1.6;
         word-break: break-all;
+        min-width: 0;
+      }
+
+      /* MessageBubble 自带气泡壳，这里只保留父级原有的气泡外观 */
+      .msg-bubble :deep(.message-bubble) {
+        max-width: 100%;
+        align-self: stretch;
+
+        .bubble {
+          padding: 0;
+          background: transparent;
+          border-radius: 0;
+          color: inherit;
+        }
       }
     }
 
@@ -218,6 +285,32 @@ const handleSendClick = () => sendMessage()
       gap: 8px;
       font-size: 13px;
       color: #9ca3af;
+    }
+
+    .msg-wrap.ai .msg-bubble.error-bubble {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #b91c1c;
+      font-size: 13px;
+
+      .retry-btn {
+        flex-shrink: 0;
+        padding: 2px 10px;
+        border-radius: 6px;
+        border: 1px solid #fecaca;
+        background: #fff;
+        color: #b91c1c;
+        font-size: 12px;
+        line-height: 1.7;
+        cursor: pointer;
+
+        &:hover {
+          background: #fee2e2;
+        }
+      }
     }
   }
 
@@ -269,6 +362,11 @@ const handleSendClick = () => sendMessage()
         background: #fee2e2;
         transform: translateY(-1px);
       }
+
+      &.disabled {
+        opacity: 0.5;
+        pointer-events: none;
+      }
     }
   }
 
@@ -281,21 +379,26 @@ const handleSendClick = () => sendMessage()
     border-radius: 8px;
     border: 1px solid #e5e7eb;
 
-    :deep(.chat-input) {
-      background: transparent;
-      padding: 4px 0;
+    .chat-input-wrap {
       flex: 1;
+      min-width: 0;
     }
 
-    .send-btn {
-      flex-shrink: 0; /* 核心修复：防止按钮被挤压导致文字换行 */
+    :deep(.input-hint) {
+      display: none;
+    }
+
+    :deep(.mention-textarea) {
+      padding: 4px 0;
+      font-size: 14px;
+      line-height: 1.6;
+      max-height: 88px;
+    }
+
+    :deep(.action-btn) {
       height: 32px;
       padding: 0 16px;
       border-radius: 6px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 4px; /* 图标与文字间距 */
     }
   }
 }

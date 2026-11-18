@@ -7,6 +7,17 @@ const routes = [
         name: 'VisitorHome',
         component: () => import('../views/HomeView.vue')
     },
+    // Agent 广场与通用对话：公开页面，游客也可访问
+    {
+        path: '/agents',
+        name: 'Agents',
+        component: () => import('../views/AgentsView.vue')
+    },
+    {
+        path: '/agents/:code',
+        name: 'AgentChat',
+        component: () => import('../views/AgentChatView.vue')
+    },
     {
         path: '/admin',
         name: 'Admin',
