@@ -13,6 +13,32 @@ const routes = [
         component: () => import('../views/AdminView.vue'),
         meta: {requiresAuth: true, role: 'admin'}
     },
+    // 知识库后台：/admin/kb/permissions 与 /admin/kb/search-test 必须排在
+    // /admin/kb/:id 之前，否则会被 :id 动态段捕获。
+    {
+        path: '/admin/kb',
+        name: 'KbList',
+        component: () => import('../views/admin/KbListView.vue'),
+        meta: {requiresAuth: true, role: 'admin'}
+    },
+    {
+        path: '/admin/kb/permissions',
+        name: 'KbPermissions',
+        component: () => import('../views/admin/KbPermissionsView.vue'),
+        meta: {requiresAuth: true, role: 'admin'}
+    },
+    {
+        path: '/admin/kb/search-test',
+        name: 'KbSearchTest',
+        component: () => import('../views/admin/SearchTestView.vue'),
+        meta: {requiresAuth: true, role: 'admin'}
+    },
+    {
+        path: '/admin/kb/:id',
+        name: 'KbDetail',
+        component: () => import('../views/admin/KbDetailView.vue'),
+        meta: {requiresAuth: true, role: 'admin'}
+    },
     {
         path: '/doctor',
         name: 'Doctor',
