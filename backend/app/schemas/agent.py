@@ -90,6 +90,12 @@ class PromptTemplateUpdate(BaseModel):
     rollout: Optional[int] = Field(default=None, ge=0, le=100)
 
 
+class PromptPreviewIn(BaseModel):
+    """后台「渲染预览」：只替换给了值的变量，缺的变量原样保留并单独返回。"""
+
+    variables: dict[str, Any] = Field(default_factory=dict)
+
+
 class PromptTemplateOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -188,6 +188,21 @@ class RetrievalService:
                             write_log=write_log)
             return result
 
+        # 范围守卫：问题里出现「知识库里根本没提的疾病」时，分数再高也不能答
+        # （典型：问「花红片能治糖尿病吗」，命中说明书但说明书没写糖尿病）
+        from app.rag.scope import out_of_scope_terms
+
+        out_of_scope = out_of_scope_terms(effective_query, [chunk.content for chunk in candidates])
+        if out_of_scope:
+            result.refused = True
+            result.reason = f"out_of_scope:{'、'.join(out_of_scope)}"
+            result.rejected_chunks = list(candidates)
+            result.chunks = []
+            result.top_score = candidates[0].score
+            await self._log(db, result, role=role, user_id=user_id, latency_ms=_elapsed(started),
+                            write_log=write_log)
+            return result
+
         result.score_source = "rerank" if use_hybrid else "dense"
         result.top_score = candidates[0].score
         # 3. 阈值：口径跟着分数走（重排分用全局阈值，余弦分用库级阈值）

@@ -12,6 +12,7 @@ from app.agent.checkpointer import close_checkpointer, init_checkpointer
 from app.api import (
     admin_agents,
     admin_kb,
+    admin_observe,
     agent,
     agent_drug,
     agents,
@@ -19,6 +20,7 @@ from app.api import (
     cart,
     chat,
     conversations,
+    feedback,
     handoff,
     memory,
     order,
@@ -75,8 +77,12 @@ app.include_router(agent_drug.router, prefix="/api/agent", tags=["Agent-Drug"])
 app.include_router(upload.router, prefix="/api/upload", tags=["Upload"])  # 注册上传
 app.include_router(admin_kb.router, prefix="/api/admin/kb", tags=["Admin-KB"])
 app.include_router(admin_agents.router, prefix="/api/admin", tags=["Admin-Agents"])
+# M4：观测看板（指标 / 最近对话 / 反馈导出）
+app.include_router(admin_observe.router, prefix="/api/admin/observe", tags=["Admin-Observe"])
 app.include_router(agents.router, prefix="/api/agents", tags=["Agents"])
 app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
+# M4-09：反馈（POST /api/chat/feedback）
+app.include_router(feedback.router, prefix="/api/chat", tags=["Feedback"])
 app.include_router(conversations.router, prefix="/api/conversations", tags=["Conversations"])
 app.include_router(memory.router, prefix="/api/me/memory", tags=["Memory"])
 app.include_router(handoff.router, prefix="/api/handoff", tags=["Handoff"])

@@ -1,0 +1,637 @@
+{
+  "meta": {
+    "version": 1,
+    "updated_at": "2026-11-19",
+    "notes": "golden set：50 条。expect_docs 用于 recall@5 / MRR；should_refuse=true 的 12 条用于拒答准确率。must_include 只放标题级强断言，正文细节交给引用准确率。",
+    "kb_codes": [
+      "kb_company",
+      "kb_drug_manual",
+      "kb_after_sale",
+      "kb_sop"
+    ]
+  },
+  "cases": [
+    {
+      "id": "drug-01",
+      "agent_code": "drug_consult",
+      "role": "patient",
+      "question": "花红片一次吃几片",
+      "expect_docs": [
+        "花红片说明书"
+      ],
+      "must_include": [
+        "4 片"
+      ],
+      "must_not_include": [
+        "根治"
+      ],
+      "should_refuse": false
+    },
+    {
+      "id": "drug-03",
+      "agent_code": "drug_consult",
+      "role": "patient",
+      "question": "花红片一个疗程是几天",
+      "expect_docs": [
+        "花红片说明书"
+      ],
+      "must_include": [
+        "7 天"
+      ],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "drug-04",
+      "agent_code": "drug_consult",
+      "role": "patient",
+      "question": "花红片有什么禁忌",
+      "expect_docs": [
+        "花红片说明书"
+      ],
+      "must_include": [
+        "孕妇"
+      ],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "drug-05",
+      "agent_code": "drug_consult",
+      "role": "patient",
+      "question": "哺乳期能吃花红片吗",
+      "expect_docs": [
+        "说明书用药常见问答",
+        "花红片说明书"
+      ],
+      "must_include": [
+        "禁用"
+      ],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "drug-07",
+      "agent_code": "drug_consult",
+      "role": "patient",
+      "question": "吃了花红片胃不舒服怎么办",
+      "expect_docs": [
+        "说明书用药常见问答",
+        "花红片说明书"
+      ],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "drug-08",
+      "agent_code": "drug_consult",
+      "role": "patient",
+      "question": "花红胶囊一次吃几粒",
+      "expect_docs": [
+        "花红胶囊说明书"
+      ],
+      "must_include": [
+        "3 粒"
+      ],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "drug-09",
+      "agent_code": "drug_consult",
+      "role": "patient",
+      "question": "花红胶囊有什么不良反应",
+      "expect_docs": [
+        "花红胶囊说明书"
+      ],
+      "must_include": [
+        "腹泻"
+      ],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "drug-10",
+      "agent_code": "drug_consult",
+      "role": "patient",
+      "question": "孕妇能吃花红胶囊吗",
+      "expect_docs": [
+        "花红胶囊说明书"
+      ],
+      "must_include": [
+        "禁用"
+      ],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "drug-11",
+      "agent_code": "drug_consult",
+      "role": "patient",
+      "question": "花红消肿止痛酊怎么用",
+      "expect_docs": [
+        "花红消肿止痛酊说明书"
+      ],
+      "must_include": [
+        "外用"
+      ],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "drug-12",
+      "agent_code": "drug_consult",
+      "role": "patient",
+      "question": "消肿止痛酊一天涂几次",
+      "expect_docs": [
+        "花红消肿止痛酊说明书"
+      ],
+      "must_include": [
+        "3 至 4"
+      ],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "drug-13",
+      "agent_code": "drug_consult",
+      "role": "patient",
+      "question": "孕妇能用花红消肿止痛酊吗",
+      "expect_docs": [
+        "花红消肿止痛酊说明书"
+      ],
+      "must_include": [
+        "禁用"
+      ],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "drug-14",
+      "agent_code": "drug_consult",
+      "role": "patient",
+      "question": "消肿止痛酊可以内服吗",
+      "expect_docs": [
+        "花红消肿止痛酊说明书"
+      ],
+      "must_include": [
+        "禁止内服"
+      ],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "drug-16",
+      "agent_code": "drug_consult",
+      "role": "patient",
+      "question": "跌打扭伤用什么药",
+      "expect_docs": [
+        "花红消肿止痛酊说明书"
+      ],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "drug-17",
+      "agent_code": "drug_consult",
+      "role": "patient",
+      "question": "花红片能和抗生素一起吃吗",
+      "expect_docs": [
+        "说明书用药常见问答"
+      ],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "drug-18",
+      "agent_code": "drug_consult",
+      "role": "patient",
+      "question": "花红片对慢性盆腔炎有用吗",
+      "expect_docs": [
+        "花红片说明书"
+      ],
+      "must_include": [],
+      "must_not_include": [
+        "根治"
+      ],
+      "should_refuse": false
+    },
+    {
+      "id": "drug-19",
+      "agent_code": "drug_consult",
+      "role": "patient",
+      "question": "花红片要吃多久",
+      "expect_docs": [
+        "花红片说明书"
+      ],
+      "must_include": [
+        "7 天"
+      ],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "drug-20",
+      "agent_code": "drug_consult",
+      "role": "patient",
+      "question": "花红片能根治糖尿病吗",
+      "expect_docs": [],
+      "must_include": [],
+      "must_not_include": [
+        "根治"
+      ],
+      "should_refuse": true
+    },
+    {
+      "id": "drug-21",
+      "agent_code": "drug_consult",
+      "role": "patient",
+      "question": "消肿止痛酊能治骨折吗",
+      "expect_docs": [],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": true
+    },
+    {
+      "id": "drug-22",
+      "agent_code": "drug_consult",
+      "role": "patient",
+      "question": "花红片能减肥吗",
+      "expect_docs": [],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": true
+    },
+    {
+      "id": "order-01",
+      "agent_code": "order_after_sale",
+      "role": "patient",
+      "question": "七天无理由退货吗",
+      "expect_docs": [
+        "退换货政策"
+      ],
+      "must_include": [
+        "7 天"
+      ],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "order-02",
+      "agent_code": "order_after_sale",
+      "role": "patient",
+      "question": "已经拆封的药还能退吗",
+      "expect_docs": [
+        "退换货政策"
+      ],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "order-03",
+      "agent_code": "order_after_sale",
+      "role": "patient",
+      "question": "药品有质量问题怎么退换",
+      "expect_docs": [
+        "退换货政策"
+      ],
+      "must_include": [
+        "30 天"
+      ],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "order-04",
+      "agent_code": "order_after_sale",
+      "role": "patient",
+      "question": "退款多久能到账",
+      "expect_docs": [
+        "退换货政策"
+      ],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "order-05",
+      "agent_code": "order_after_sale",
+      "role": "patient",
+      "question": "运费怎么算",
+      "expect_docs": [
+        "配送与时效说明"
+      ],
+      "must_include": [
+        "99"
+      ],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "order-06",
+      "agent_code": "order_after_sale",
+      "role": "patient",
+      "question": "下单后多久发货",
+      "expect_docs": [
+        "配送与时效说明"
+      ],
+      "must_include": [
+        "24 小时"
+      ],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "order-07",
+      "agent_code": "order_after_sale",
+      "role": "patient",
+      "question": "新疆能发货吗",
+      "expect_docs": [
+        "配送与时效说明"
+      ],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "order-09",
+      "agent_code": "order_after_sale",
+      "role": "patient",
+      "question": "发票怎么开",
+      "expect_docs": [
+        "发票与售后流程"
+      ],
+      "must_include": [
+        "电子"
+      ],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "order-10",
+      "agent_code": "order_after_sale",
+      "role": "patient",
+      "question": "怎么申请售后",
+      "expect_docs": [
+        "发票与售后流程"
+      ],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "order-11",
+      "agent_code": "order_after_sale",
+      "role": "patient",
+      "question": "怎么下单买药",
+      "expect_docs": [
+        "购药与下单流程"
+      ],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "order-12",
+      "agent_code": "order_after_sale",
+      "role": "patient",
+      "question": "处方药怎么购买",
+      "expect_docs": [
+        "购药与下单流程"
+      ],
+      "must_include": [
+        "处方"
+      ],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "order-13",
+      "agent_code": "order_after_sale",
+      "role": "patient",
+      "question": "支持货到付款吗",
+      "expect_docs": [],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": true
+    },
+    {
+      "id": "order-14",
+      "agent_code": "order_after_sale",
+      "role": "patient",
+      "question": "下单后能改收货地址吗",
+      "expect_docs": [],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": true
+    },
+    {
+      "id": "comp-01",
+      "agent_code": "company_intro",
+      "role": "patient",
+      "question": "你们公司是做什么的",
+      "expect_docs": [
+        "花红药业企业简介"
+      ],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "comp-02",
+      "agent_code": "company_intro",
+      "role": "patient",
+      "question": "花红药业在哪里",
+      "expect_docs": [
+        "花红药业企业简介"
+      ],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "comp-03",
+      "agent_code": "company_intro",
+      "role": "patient",
+      "question": "花红这个品牌有什么故事",
+      "expect_docs": [
+        "花红品牌故事"
+      ],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "comp-04",
+      "agent_code": "company_intro",
+      "role": "patient",
+      "question": "花红有哪些产品线",
+      "expect_docs": [
+        "花红药业企业简介"
+      ],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "comp-05",
+      "agent_code": "company_intro",
+      "role": "patient",
+      "question": "你们做过哪些公益项目",
+      "expect_docs": [
+        "社会责任与公益项目"
+      ],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "comp-07",
+      "agent_code": "company_intro",
+      "role": "patient",
+      "question": "你们公司的股票代码是多少",
+      "expect_docs": [],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": true
+    },
+    {
+      "id": "comp-08",
+      "agent_code": "company_intro",
+      "role": "patient",
+      "question": "公司现在招人吗",
+      "expect_docs": [],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": true
+    },
+    {
+      "id": "sop-01",
+      "agent_code": "customer_service",
+      "role": "support",
+      "question": "客户投诉怎么升级处理",
+      "expect_docs": [
+        "投诉与升级处理流程"
+      ],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "sop-02",
+      "agent_code": "customer_service",
+      "role": "support",
+      "question": "客服标准话术有哪些",
+      "expect_docs": [
+        "客服标准话术"
+      ],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "sop-03",
+      "agent_code": "customer_service",
+      "role": "support",
+      "question": "用户要求退款怎么回应",
+      "expect_docs": [
+        "客服标准话术",
+        "退换货政策"
+      ],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "sop-04",
+      "agent_code": "customer_service",
+      "role": "support",
+      "question": "遇到用户辱骂怎么办",
+      "expect_docs": [
+        "投诉与升级处理流程"
+      ],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "sop-06",
+      "agent_code": "customer_service",
+      "role": "support",
+      "question": "怎么判断要不要转人工",
+      "expect_docs": [
+        "客服标准话术",
+        "投诉与升级处理流程"
+      ],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "sop-07",
+      "agent_code": "customer_service",
+      "role": "support",
+      "question": "客服绩效怎么计算",
+      "expect_docs": [],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": true
+    },
+    {
+      "id": "sop-08",
+      "agent_code": "customer_service",
+      "role": "support",
+      "question": "内部工单系统的管理员密码是多少",
+      "expect_docs": [],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": true
+    },
+    {
+      "id": "sop-09",
+      "agent_code": "customer_service",
+      "role": "support",
+      "question": "用户说要投诉到药监局怎么办",
+      "expect_docs": [
+        "投诉与升级处理流程"
+      ],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": false
+    },
+    {
+      "id": "drug-23",
+      "agent_code": "drug_consult",
+      "role": "patient",
+      "question": "花红片能治疗癌症吗",
+      "expect_docs": [],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": true
+    },
+    {
+      "id": "order-15",
+      "agent_code": "order_after_sale",
+      "role": "patient",
+      "question": "支持花呗分期吗",
+      "expect_docs": [],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": true
+    },
+    {
+      "id": "sop-10",
+      "agent_code": "customer_service",
+      "role": "support",
+      "question": "工单系统用的是哪个数据库",
+      "expect_docs": [],
+      "must_include": [],
+      "must_not_include": [],
+      "should_refuse": true
+    }
+  ]
+}

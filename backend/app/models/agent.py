@@ -147,5 +147,10 @@ class Message(Base):
     trace_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     latency_ms: Mapped[int] = mapped_column(Integer, default=0)
     usage: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    # M4：输出治理结果（flags / violations）与用户反馈，看板与导出都读这两列
+    guardrail: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    feedback: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    # M4：这一轮实际命中的 prompt 版本（灰度时同一 code 可能是不同版本）
+    prompt_version: Mapped[str] = mapped_column(String(32), default="")
 
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")

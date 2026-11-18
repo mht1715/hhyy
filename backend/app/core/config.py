@@ -124,6 +124,12 @@ class Settings(BaseSettings):
     milvus_uri: str = "http://localhost:19530"
     milvus_token: str = ""  # 本地 standalone 不需要认证，留空即可
 
+    # --- M4：成本估算（元 / 千 token）---
+    # 看板里的「成本」是按单价估算，不是账单；官方调价时改这两个值即可，
+    # 不要让看板去猜（Langfuse 的 cost 只有接了它的 cost 表才有）。
+    llm_price_input_per_1k: float = 0.0005
+    llm_price_output_per_1k: float = 0.002
+
     @property
     def database_url(self) -> str:
         return (

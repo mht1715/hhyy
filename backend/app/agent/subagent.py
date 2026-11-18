@@ -76,6 +76,8 @@ class SubAgentDraft:
     needs_disclaimer: bool = False
     # 准备阶段就判定「无法作答」时直接给的固定话术（不花模型调用）
     fallback_text: Optional[str] = None
+    # M4-05：这一版 prompt 的标识（code@vN），灰度时同一 Agent 可能落在不同版本
+    prompt_version: str = ""
 
 
 @dataclass(slots=True)
@@ -108,20 +110,45 @@ def _render(template: str, values: dict[str, str]) -> str:
 
 async def load_prompt(db: Any, agent: AgentConfig) -> str:
     """取该 Agent 的 production prompt，取不到就用内置模板（降级不报错）。"""
+    content, _version = await load_prompt_versioned(db, agent)
+    return content
+
+
+def rollout_bucket(user_id: Any) -> int:
+    """兼容旧调用点：实现已收敛到 ``app.agent.prompts``。"""
+    from app.agent.prompts import rollout_bucket as _bucket
+
+    return _bucket(user_id)
+
+
+async def load_prompt_versioned(
+    db: Any, agent: AgentConfig, *, user_id: Any = None
+) -> tuple[str, str]:
+    """返回 ``(content, "code@vN")``；灰度命中 testing 版本时返回那一版。"""
     if not agent.system_prompt_code:
-        return DEFAULT_PROMPT
-    row = (
-        await db.execute(
-            select(PromptTemplate)
-            .where(
-                PromptTemplate.code == agent.system_prompt_code,
-                PromptTemplate.status == PromptStatus.PRODUCTION.value,
+        return DEFAULT_PROMPT, ""
+    rows = list(
+        (
+            await db.execute(
+                select(PromptTemplate)
+                .where(
+                    PromptTemplate.code == agent.system_prompt_code,
+                    PromptTemplate.status.in_(
+                        [PromptStatus.PRODUCTION.value, PromptStatus.TESTING.value]
+                    ),
+                )
+                .order_by(PromptTemplate.version.desc())
             )
-            .order_by(PromptTemplate.version.desc())
-            .limit(1)
         )
-    ).scalar_one_or_none()
-    return row.content if row and row.content else DEFAULT_PROMPT
+        .scalars()
+        .all()
+    )
+    from app.agent.prompts import resolve_prompt_rows, version_label
+
+    row, _reason = resolve_prompt_rows(rows, bucket=rollout_bucket(user_id))
+    if row is None:
+        return DEFAULT_PROMPT, ""
+    return (row.content or DEFAULT_PROMPT), version_label(row)
 
 
 def _context_from_chunks(chunks: list[Any]) -> tuple[str, list[dict[str, Any]]]:
@@ -304,7 +331,7 @@ async def prepare_subagent(
         await run("remember", content=message)
 
     context_text = "\n\n".join(blocks).strip()
-    prompt_template = await load_prompt(db, agent)
+    prompt_template, prompt_version = await load_prompt_versioned(db, agent, user_id=user_id)
     system_prompt = _render(
         prompt_template,
         {
@@ -341,6 +368,7 @@ async def prepare_subagent(
         retrieval={**kb_hits, "agent_code": agent.code},
         tool_calls=tool_events,
         needs_disclaimer=needs_disclaimer(agent),
+        prompt_version=prompt_version,
     )
 
     # 4) 没有资料可依据：直接给拒答话术，不浪费一次模型调用

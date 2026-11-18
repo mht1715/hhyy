@@ -20,6 +20,7 @@ from app.models.agent import (
 )
 from app.models.base import Base
 from app.models.cart import CartItem
+from app.models.eval import EvalRun
 from app.models.handoff import HandoffTicket, HandoffTrigger, TicketStatus
 from app.models.kb import (
     AuditLog,
@@ -50,6 +51,7 @@ __all__ = [
     "ConversationStatus",
     "DocumentSource",
     "DocumentStatus",
+    "EvalRun",
     "HandoffTicket",
     "HandoffTrigger",
     "KbChunk",

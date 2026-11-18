@@ -549,6 +549,9 @@ async def chat_stream(
                             (time.perf_counter() - ctx.started_at) * 1000
                         )
                         assistant.usage = done_data.get("usage") or {}
+                        # M4：治理结果与 prompt 版本落库（看板聚合、消息回溯都靠这两列）
+                        assistant.guardrail = ctx.guardrail or {}
+                        assistant.prompt_version = ctx.prompt_version or ""
                         await sdb.commit()
 
                     try:

@@ -121,6 +121,12 @@ class TurnContext:
     handoff: Optional[dict[str, Any]] = None
     answer: str = ""
     guardrail: dict[str, Any] = field(default_factory=dict)
+    # M4-06：合规改写命中项（流式与非流式两条路径都往这里记）
+    compliance_hits: list[dict[str, Any]] = field(default_factory=list)
+    # M4-06：用户这句话里的高危症状（非空时回答前会插「立即就医」）
+    high_risk: list[str] = field(default_factory=list)
+    # M4-05：本轮实际命中的 prompt 版本（code@vN）
+    prompt_version: str = ""
     started_at: float = field(default_factory=time.perf_counter)
     need_disclaimer: bool = False
 
@@ -355,6 +361,8 @@ class ChatRuntime:
                 ctx.emit("agent", {"code": agent.code, "name": agent.name, "phase": "done", "ok": False})
                 continue
             drafts.append(item)
+            if not ctx.prompt_version and getattr(item, "prompt_version", ""):
+                ctx.prompt_version = item.prompt_version
 
         # 多 Agent 才需要各自先写一段结论（单 Agent 直接流式生成，省一次往返）
         if multi and drafts:
@@ -415,6 +423,25 @@ class ChatRuntime:
     async def _compose_node(self, state: AgentState, ctx: TurnContext) -> AgentState:
         request = ctx.request
 
+        # M4-06：用户描述了急症 → 任何药品建议都要让位给「立即就医」。
+        # 这段话必须在生成之前发出去，等回答写完再补就晚了。
+        from app.guardrail.compliance import (
+            EMERGENCY_NOTICE,
+            apply_emergency_notice,
+            detect_high_risk,
+            rewrite_claims,
+        )
+
+        ctx.high_risk = detect_high_risk(request.message)
+        if ctx.high_risk:
+            ctx.emit("delta", {"text": f"{EMERGENCY_NOTICE}\n\n"})
+
+        def clean(text: str) -> str:
+            """非流式文本统一过合规改写（流式路径在 _stream_answer 里边流边改）。"""
+            outcome = rewrite_claims(text)
+            ctx.compliance_hits.extend(hit.as_dict() for hit in outcome.hits)
+            return outcome.text
+
         if ctx.results:  # 多 Agent：合并引用后汇总
             merged, remaps = merge_citations(ctx.results)
             ctx.citations = merged
@@ -467,6 +494,7 @@ class ChatRuntime:
             names = "、".join(result.agent.name for result in ctx.results if result.ok) or "以上助手"
             answer = "\n\n".join(sections)
             answer += f"\n\n> 以上结论分别来自 {names}；涉及用药与售后两件事时，请以各自主管助手的答复为准。"
+            answer = clean(answer)
             ctx.emit("delta", {"text": answer})
             ctx.answer = answer
             return {
@@ -477,7 +505,7 @@ class ChatRuntime:
 
         draft = ctx.drafts[0] if ctx.drafts else None
         if draft is None:
-            text = refusal_text("no_kb")
+            text = clean(refusal_text("no_kb"))
             ctx.emit("delta", {"text": text})
             ctx.answer = text
             return {"messages": [{"role": "assistant", "content": text}]}
@@ -491,13 +519,17 @@ class ChatRuntime:
         ]
 
         if draft.fallback_text:  # 无资料可依据：直接给拒答话术，不调模型
-            ctx.emit("delta", {"text": draft.fallback_text})
-            ctx.answer = draft.fallback_text
+            text = clean(draft.fallback_text)
+            ctx.emit("delta", {"text": text})
+            ctx.answer = text
             ctx.need_disclaimer = False
         else:
             ctx.answer = await self._stream_answer(
                 draft.messages, ctx, valid={c["index"] for c in draft.citations}
             )
+        if ctx.high_risk:
+            # 提示已经在最前面发过，这里只是让「落库/治理」看到和用户一样的内容
+            ctx.answer = apply_emergency_notice(ctx.answer)
         ctx.emit(
             "agent",
             {
@@ -521,9 +553,24 @@ class ChatRuntime:
         valid: set[int],
         max_tokens: int | None = None,
     ) -> str:
-        """流式生成 + 边发边过滤角标（见 app/guardrail/citations.py）。"""
+        """流式生成 + 边发边过滤（引用角标 + 医药合规词），见 app/guardrail/。"""
+        from app.guardrail.compliance import ComplianceStreamFilter
+
         guard = CitationStreamFilter(valid)
+        compliance = ComplianceStreamFilter()
         pieces: list[str] = []
+
+        def pump(raw: str) -> None:
+            """先过引用闸门、再过合规闸门；只把最终要发出去的文本收集起来。
+
+            ``pieces`` 必须是**过滤后**的文本：它会被写回 ``messages.content``，
+            如果收集原文，用户看到的和库里存的就不是同一句话了。
+            """
+            safe = compliance.feed(guard.feed(raw))
+            if safe:
+                pieces.append(safe)
+                ctx.emit("delta", {"text": safe})
+
         try:
             from app.observability.tracing import get_trace_sink
 
@@ -534,10 +581,7 @@ class ChatRuntime:
                 text = str(getattr(chunk, "content", "") or "")
                 if not text:
                     continue
-                pieces.append(text)
-                safe = guard.feed(text)
-                if safe:
-                    ctx.emit("delta", {"text": safe})
+                pump(text)
         except Exception as exc:  # noqa: BLE001 —— 生成失败也要把已得内容说清楚
             logger.warning("生成失败：%s", exc)
             note = "\n\n（回答生成中断，请重试）"
@@ -546,10 +590,12 @@ class ChatRuntime:
             pieces.append(note)
             ctx.emit("delta", {"text": note})
 
-        tail = guard.flush()
+        pump(guard.flush())
+        tail = compliance.flush()
         if tail:
             pieces.append(tail)
             ctx.emit("delta", {"text": tail})
+        ctx.compliance_hits.extend(hit.as_dict() for hit in compliance.hits)
         return "".join(pieces)
 
     async def _guardrail_node(self, state: AgentState, ctx: TurnContext) -> AgentState:
@@ -565,7 +611,44 @@ class ChatRuntime:
             outcome.text = ctx.answer.rstrip() + extra
 
         ctx.answer = outcome.text
-        ctx.guardrail = {"passed": outcome.passed, "flags": outcome.flags}
+
+        # M4-06：②④⑤ 三层（引用存在性 / 批准文号 / 免责声明）+ 合规改写结果合并成一份报告。
+        # 流式路径的违规词已在 _stream_answer 里改掉，这里只做「事后审计 + 记账」。
+        from app.guardrail.validators import validate_output
+
+        report = validate_output(
+            ctx.answer, citations=outcome.citations, need_disclaimer=ctx.need_disclaimer
+        )
+        flags = list(outcome.flags)
+        if ctx.compliance_hits:
+            flags.append("compliance_rewritten")
+        if ctx.high_risk:
+            flags.append("high_risk_notice")
+        flags.extend(report.flags)
+        violations = list(ctx.compliance_hits) + [item.as_dict() for item in report.violations]
+
+        ctx.guardrail = {
+            "passed": outcome.passed and report.passed,
+            "flags": sorted(set(flags)),
+            "violations": violations,
+            "high_risk": list(ctx.high_risk),
+            "prompt_version": ctx.prompt_version,
+        }
+
+        # 合规命中要能在 Langfuse 里按类型聚合（PRD FR8.6）
+        if violations:
+            try:
+                from app.observability.tracing import get_trace_sink
+
+                category = str(violations[0].get("category") or violations[0].get("kind") or "other")
+                get_trace_sink().score(
+                    ctx.trace,
+                    "guardrail_violation",
+                    category,
+                    comment=f"{len(violations)} 处：{category}",
+                )
+            except Exception:  # noqa: BLE001 —— 打分失败不影响回答
+                logger.debug("guardrail 打分失败", exc_info=True)
 
         # 转人工：模型调了 escalate_human（敏感词也会走到这里）→ 真正建工单。
         # 敏感场景的更早期路径在 API 层预检（ctx.pre_handoff），那条路径能保证

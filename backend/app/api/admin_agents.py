@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from typing import Any, Optional
 
@@ -28,6 +29,7 @@ from app.schemas.agent import (
     AgentCreate,
     AgentOut,
     AgentUpdate,
+    PromptPreviewIn,
     PromptTemplateCreate,
     PromptTemplateOut,
     PromptTemplateUpdate,
@@ -294,8 +296,87 @@ async def update_prompt(
     return ResponseModel(data=prompt)
 
 
-# --------------------------------------------------------------------- 工具清单
-@router.get("/tools", response_model=ResponseModel[list[dict]])
+# --------------------------------------------------------------------- Prompt 预览 / 灰度
+VAR_PATTERN = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
+
+
+@router.post("/prompts/{prompt_id}/preview", response_model=ResponseModel[dict])
+async def preview_prompt(
+    prompt_id: uuid.UUID,
+    payload: PromptPreviewIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = AdminOnly,
+):
+    """按样例变量渲染模板：缺的变量原样保留，单独列出来提醒补全。
+
+    和运行时用的是同一套「只替换已知占位符」规则（``subagent._render``），
+    这样后台预览看到的和线上跑出来的不会出现「格式函数不一致」的差异。
+    """
+    prompt = await db.get(PromptTemplate, prompt_id)
+    if prompt is None:
+        raise HTTPException(status_code=404, detail="prompt 不存在")
+
+    content = prompt.content or ""
+    used = sorted(set(VAR_PATTERN.findall(content)))
+    provided = {
+        key: str(value)
+        for key, value in (payload.variables or {}).items()
+        if value is not None
+    }
+    missing = [name for name in used if name not in provided]
+
+    rendered = content
+    for name in used:
+        if name in provided:
+            rendered = rendered.replace("{" + name + "}", provided[name])
+
+    return ResponseModel(
+        data={"rendered": rendered, "missing": missing, "used": used, "code": prompt.code,
+              "version": prompt.version}
+    )
+
+
+@router.get("/prompts/{code}/resolve", response_model=ResponseModel[dict])
+async def resolve_prompt_version(
+    code: str,
+    user_key: str = "",
+    db: AsyncSession = Depends(get_db),
+    current_user: User = AdminOnly,
+):
+    """演示灰度：给定一个 user_key，返回实际会命中哪一版（与运行时同一份逻辑）。"""
+    rows = list(
+        (
+            await db.execute(
+                select(PromptTemplate)
+                .where(PromptTemplate.code == code)
+                .order_by(PromptTemplate.version.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"prompt 不存在：{code}")
+
+    from app.agent.prompts import resolve_prompt_rows, rollout_bucket, version_label
+
+    bucket = rollout_bucket(user_key or None)
+    row, reason = resolve_prompt_rows(rows, bucket=bucket)
+    return ResponseModel(
+        data={
+            "code": code,
+            "version": getattr(row, "version", None),
+            "status": getattr(row, "status", ""),
+            "rollout": int(getattr(row, "rollout", 0) or 0),
+            "label": version_label(row),
+            "user_key": user_key,
+            "bucket": bucket,
+            "reason": reason,
+        }
+    )
+
+
+# --------------------------------------------------------------------- 工具清单@router.get("/tools", response_model=ResponseModel[list[dict]])
 async def list_available_tools(current_user: User = AdminOnly):
     """给后台下拉用：工具名 + 描述 + JSON Schema（Function Calling 同一份）。"""
     return ResponseModel(
