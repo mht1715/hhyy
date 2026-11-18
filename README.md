@@ -15,13 +15,13 @@
 | --- | --- | --- |
 | 全栈骨架（FastAPI + Vue3/Vant + PG + Redis） | ✅ | 登录、RBAC、药品 CRUD、购物车、订单 |
 | 药品入库 Agent（自然语言 → 结构化表单） | ✅ | `/api/agent/parse-product` |
-| 药品咨询 Agent | 🟡 | 可用，但仍是「整段说明书塞 prompt」的过渡实现，M1 替换为真 RAG |
+| 药品咨询 Agent | ✅ | M1 已改为真 RAG：检索 + `[n]` 引用 + 低分拒答（`/api/agent/drug-consult`） |
 | 统一模型工厂 | ✅ | 单一入口，温度/超时/重试集中，缺 key 给 503 而不是崩 |
-| 数据库迁移 | ✅ | Alembic（老库自动 stamp，不重复建表） |
+| 数据库迁移 | ✅ | Alembic（老库自动 stamp，不重复建表），0001 baseline + 0002 知识库 |
 | 分层接口契约 | ✅ | LLM / Retriever / Tool / Memory / TraceSink 六个 Protocol + 测试替身 |
 | 可观测（Langfuse） | ✅ | 一键开关，未配置即 no-op，绝不阻塞回答 |
 | CI | ✅ | ruff + pytest + 前端构建 |
-| **多知识库 RAG（Milvus）** | 🚧 | M1 进行中：解析 / 分块 / 混合检索 / 权限过滤 / 检索测试台 |
+| **多知识库 RAG（Milvus）** | ✅ | M1：解析 / 分块 / 混合检索（BM25+dense+RRF）/ 重排 / 角色 ACL / 检索测试台 |
 | 多 Agent 与 `@` 协作 | 📋 | M2 |
 | 记忆系统 + 转人工 | 📋 | M3 |
 | 评估集与指标看板 | 📋 | M4 |
@@ -116,7 +116,8 @@ Copy-Item .env.example .env
 | `.\script\dev.ps1 up` | 启动依赖服务 |
 | `.\script\dev.ps1 status` | 查看容器状态 |
 | `.\script\dev.ps1 init` | Alembic 建表 / 升级 |
-| `.\script\dev.ps1 seed` | 灌演示数据 |
+| `.\script\dev.ps1 seed` | 灌演示数据（账号 + 药品） |
+| `.\script\dev.ps1 kb` | 灌知识库种子（4 库 12 文档，真实调用 embedding） |
 | `.\script\dev.ps1 test` | 单元测试（不连外部服务） |
 | `.\script\dev.ps1 lint` | ruff |
 | `.\script\dev.ps1 check` | **提交前跑**：lint + test + 前端构建 |
@@ -139,6 +140,81 @@ Copy-Item .env.example .env
 - 自检：`.\script\dev.ps1 langfuse`，或在后台看 trace `agent.parse_product`。
 - 埋点位置：`app/observability/`。业务代码只调 `get_trace_sink()`，从不直接 import SDK。
 - 注意：`get_trace_url()` 会同步请求 Langfuse API，只允许出现在运维脚本里。
+
+---
+
+## 知识库与 RAG（M1）
+
+### 一句话架构
+
+知识库是**数据**不是代码：后台建库 → 传文档 → 勾权限，前台检索自动生效。
+向量统一落在单个 Milvus collection `hhyy_kb_chunks`，靠 `kb_id` 标量索引隔离。
+
+### 权限怎么生效
+
+| 层 | 判什么 | 在哪 |
+| --- | --- | --- |
+| 功能 RBAC | 能不能进后台 / 调某个接口 | `Depends(require_roles([...]))` |
+| 数据 ACL | 这次检索能召回哪些库的 chunk | `app/rag/acl.py` 产出 `kb_id in [...]`，**拼进 Milvus 的 filter 表达式** |
+
+三条不能破的规则：
+
+1. **默认拒绝**：新建库没有任何授权行 = 谁都检索不到（只有 `visibility=public` 例外）。
+2. **过滤下推到向量库**：绝不「先召回 30 条再过滤」——那要么答不出，要么泄露。
+3. **权限变更 ≤30s 生效**：Redis 缓存 key 带版本号，写操作 `INCR version` 即整体失效。
+
+### 检索链路
+
+```
+query ──(有历史→LLM 改写)──> embedding
+   ├─ dense:  top30 (COSINE)
+   ├─ sparse: top30 (Milvus 内置 BM25，chinese analyzer)
+   ├─ RRF(k=60) 融合
+   ├─ gte-rerank-v2 重排 → top5
+   └─ 阈值：top1 < 阈值 → 拒答（不回退、不编造）
+```
+
+**阈值有两个，因为两种分数虽然都在 0~1，分布却差一个数量级**：
+
+| 打分口径 | 阈值 | 实测依据 |
+| --- | --- | --- |
+| 重排分（正常路径） | `RERANK_SCORE_THRESHOLD=0.15` | 10 正 / 10 负问题：负例最高 0.135，正例最低 0.175 |
+| 余弦相似度（重排降级时） | 库级 `score_threshold`（0.35 / 0.40） | 无关问题也能到 0.69，泛问句只有 0.28 |
+
+用一个数卡两种分数，结果是「重排路径全拒、余弦路径全放」。RRF 融合分只有 0.0x
+量级，永远不能直接当阈值判据——这个取舍写在 `app/rag/retriever.py` 的模块注释里。
+
+> 排障提示：`gte-rerank`（老模型名）在本账号返回 403 `AccessDenied`，可用的是
+> `gte-rerank-v2`。重排一旦静默降级，症状是「泛问句全被拒答」，很像阈值调错了。
+
+### 后台接口
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET/POST | `/api/admin/kb` | 列表（含文档数/chunk 数）/ 新建 |
+| GET/PUT/DELETE | `/api/admin/kb/{id}` | 详情 / 修改 / 删除（连向量一起删） |
+| GET/POST | `/api/admin/kb/{id}/documents` | 文档列表（状态轮询）/ 上传（file \| url \| text） |
+| POST | `/api/admin/kb/{id}/documents/{doc_id}/reindex` | 重新解析（游标清零，全量重建） |
+| POST | `/api/admin/kb/{id}/documents/{doc_id}/retry` | 失败重试（保留游标，断点续传） |
+| GET | `/api/admin/kb/{id}/documents/{doc_id}/chunks` | 分段列表 |
+| PUT | `/api/admin/kb/{id}/chunks/{chunk_id}` | 改正文 → **只重建这一条**向量 |
+| GET | `/api/admin/kb/permissions` | 权限矩阵（库 × 角色） |
+| PUT | `/api/admin/kb/{id}/permissions` | 保存授权（全量覆盖 + 审计 + 失效缓存） |
+| POST | `/api/admin/kb/{id}/search-test` | **检索测试台**：以任意角色身份检索 |
+| GET | `/api/admin/kb/stats` | 文档/chunk 数、7 日检索次数、零召回榜 |
+
+### 五分钟演示（这是 M1 最值钱的一段）
+
+1. `.\script\dev.ps1 kb` → 4 个库 12 篇文档全部 `ready`
+2. admin 登录 → `/admin/kb` → 看到 4 个库的文档数与 chunk 数
+3. `/admin/kb/permissions` → 看「说明书 = patient/doctor/support，SOP = 仅 support」
+4. `/admin/kb/search-test` → 点顶部「快捷用例」里的 **游客问售后**：同一句「七天无理由退货吗」，
+   `visitor` 显示「被过滤：订单与售后政策」、`low_score` 拒答；换成 **售后政策**（patient）立刻命中
+   —— **权限是在检索层生效的**。另外 `越权查 SOP` 演示 `no_permission`（拒绝 ≠ 没搜到）。
+5. 药品详情页问「哺乳期能吃吗」→ 回答带 `[1]` 角标，引用指向说明书【禁忌】
+
+> 测试台默认「全部库 + patient」，页面会显示 `top_score / 阈值` 和打分口径。
+> 拒答时也会把「差一点」的片段列出来——看不到分数就只能靠猜是权限、召回还是阈值的问题。
 
 ---
 
