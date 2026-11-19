@@ -75,7 +75,6 @@ async def remove_item(item_id: UUID, db: AsyncSession = Depends(get_db), current
 
 @router.delete("", response_model=ResponseModel[dict])
 async def clear_cart(db: AsyncSession = Depends(get_db), current_user: User = AnyUser):
-    await db.execute(select(CartItem).where(CartItem.user_id == current_user.id))
     items = (await db.execute(select(CartItem).where(CartItem.user_id == current_user.id))).scalars().all()
     for item in items:
         await db.delete(item)
@@ -98,7 +97,3 @@ async def update_cart_item(
     item.quantity = data.quantity
     await db.commit()
     return ResponseModel(data={"message": "更新成功"})
-
-
-class CartUpdate(BaseModel):
-    quantity: int

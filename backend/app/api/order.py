@@ -3,7 +3,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -23,16 +23,22 @@ router = APIRouter()
 
 class OrderItemCreate(BaseModel):
     product_id: UUID
-    quantity: int
+    # ge=1：数量 0 / 负数会造出 0 元订单，库存还会被「减 0」，属于静默脏数据
+    quantity: int = Field(..., ge=1)
 
 
 class OrderCreate(BaseModel):
     items: Optional[List[OrderItemCreate]] = None
+    # 这批 items 是不是「从购物车勾选结算」的：
+    # True 时下单成功后要把对应购物车行删掉，否则勾选结算会变成「下单了但车里还在」。
+    # 立即购买（detail 页）不置位——那时购物车里的同款商品不是这次下单的对象。
+    from_cart: bool = False
 
 
 @router.post("/checkout", response_model=ResponseModel[dict])
 async def checkout(data: OrderCreate = None, db: AsyncSession = Depends(get_db), current_user: User = AnyUser):
     order_items_to_create = []
+    cart_items = []
 
     if data and data.items:
         for item in data.items:
@@ -67,7 +73,19 @@ async def checkout(data: OrderCreate = None, db: AsyncSession = Depends(get_db),
         item["product"].stock -= item["quantity"]
 
     if not (data and data.items):
+        # 整车结算：购物车清空
         for ci in cart_items:
+            await db.delete(ci)
+    elif data.from_cart:
+        # 勾选结算：只删这次真正下过单的那几行，车里其它商品要留着
+        ordered_ids = {item["product"].id for item in order_items_to_create}
+        rows = await db.execute(
+            select(CartItem).where(
+                CartItem.user_id == current_user.id,
+                CartItem.product_id.in_(ordered_ids),
+            )
+        )
+        for ci in rows.scalars().all():
             await db.delete(ci)
 
     await db.commit()
