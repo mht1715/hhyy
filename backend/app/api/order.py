@@ -2,18 +2,19 @@
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import AdminOnly, AnyUser
 from app.core.database import get_db
+from app.core.timefmt import iso_utc
 from app.models.cart import CartItem
 from app.models.order import Order, OrderItem, OrderStatus
 from app.models.product import Product
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.order import OrderItemResponse, OrderResponse
 from app.schemas.response import ResponseModel
 
@@ -85,10 +86,7 @@ async def my_orders(db: AsyncSession = Depends(get_db), current_user: User = Any
 
     res = []
     for o in orders:
-        items = [OrderItemResponse(
-            product_id=i.product_id, name=i.product.name, quantity=i.quantity,
-            unit_price=i.unit_price, image_url=i.product.image_url
-        ) for i in o.items]
+        items = _order_items(o)
         res.append(OrderResponse(
             id=o.id, total_amount=o.total_amount, status=o.status,
             created_at=o.created_at, items=items
@@ -96,21 +94,128 @@ async def my_orders(db: AsyncSession = Depends(get_db), current_user: User = Any
     return ResponseModel(data=res)
 
 
+def _order_items(order: Order) -> list[OrderItemResponse]:
+    return [
+        OrderItemResponse(
+            product_id=i.product_id,
+            name=i.product.name,
+            quantity=i.quantity,
+            unit_price=i.unit_price,
+            image_url=i.product.image_url,
+        )
+        for i in order.items
+    ]
+
+
+@router.get("/admin/all", response_model=ResponseModel[dict])
+async def admin_all_orders(
+    status: str = Query(default="", max_length=20),
+    keyword: str = Query(default="", max_length=32),
+    limit: int = Query(default=50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = AdminOnly,
+):
+    """管理员订单管理列表。
+
+    之前后台没有任何「看全部订单」的入口：管理员只能在订单详情页里点一下
+    「模拟发货」，先得知道订单号——等于没有。这个接口按状态筛选 + 按用户名搜索，
+    顺带回一份各状态数量，前端 Tab 上的角标直接用。
+
+    注意路由顺序：本接口必须声明在 ``GET /{order_id}`` 之前，否则 ``admin``
+    会被当成 UUID 去解析，直接 422。
+    """
+    conditions = []
+    status_text = (status or "").strip().lower()
+    if status_text and status_text != "all":
+        conditions.append(Order.status == status_text)
+    text = (keyword or "").strip()
+    if text:
+        conditions.append(User.username.ilike(f"%{text}%"))
+
+    base = select(Order).options(
+        selectinload(Order.items).selectinload(OrderItem.product),
+        selectinload(Order.user),
+    )
+    if conditions:
+        base = base.join(Order.user, isouter=True).where(*conditions)
+
+    orders = (
+        await db.execute(base.order_by(Order.created_at.desc()).limit(limit))
+    ).scalars().all()
+
+    count_rows = (
+        await db.execute(select(Order.status, func.count()).group_by(Order.status))
+    ).all()
+    counts = {str(row[0]): int(row[1]) for row in count_rows}
+
+    items: list[dict] = []
+    for order in orders:
+        items.append(
+            {
+                "id": str(order.id),
+                "status": order.status,
+                "total_amount": float(order.total_amount or 0),
+                "created_at": iso_utc(order.created_at),
+                "user_id": str(order.user_id),
+                "username": order.user.username if order.user is not None else "—",
+                "items": [item.model_dump(mode="json") for item in _order_items(order)],
+                "item_count": sum(int(i.quantity or 0) for i in order.items),
+            }
+        )
+
+    return ResponseModel(
+        data={
+            "items": items,
+            "counts": counts,
+            "total": sum(counts.values()),
+            "pending_ship": counts.get(OrderStatus.PAID.value, 0),
+            "filter": {"status": status_text or "all", "keyword": text, "limit": limit},
+        }
+    )
+
+
+@router.get("/admin/summary", response_model=ResponseModel[dict])
+async def admin_order_summary(db: AsyncSession = Depends(get_db), current_user: User = AdminOnly):
+    """工作台角标用的极简计数：只要数字，不带列表。"""
+    count_rows = (
+        await db.execute(select(Order.status, func.count()).group_by(Order.status))
+    ).all()
+    counts = {str(row[0]): int(row[1]) for row in count_rows}
+    paid = counts.get(OrderStatus.PAID.value, 0)
+    shipped = counts.get(OrderStatus.SHIPPED.value, 0)
+    revenue_row = (
+        await db.execute(
+            select(func.coalesce(func.sum(Order.total_amount), 0)).where(
+                Order.status.in_([OrderStatus.PAID.value, OrderStatus.SHIPPED.value, OrderStatus.COMPLETED.value])
+            )
+        )
+    ).scalar_one()
+    return ResponseModel(
+        data={
+            "counts": counts,
+            "total": sum(counts.values()),
+            "pending_ship": paid,
+            "in_transit": shipped,
+            "revenue": float(revenue_row or 0),
+        }
+    )
+
+
 # 获取单个订单详情
 @router.get("/{order_id}", response_model=ResponseModel[OrderResponse])
 async def get_order_detail(order_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = AnyUser):
+    # 管理员订单管理里点「详情」要看得到别人的订单；患者/医生等只能看自己的
+    stmt = select(Order).where(Order.id == order_id)
+    if current_user.role != UserRole.ADMIN:
+        stmt = stmt.where(Order.user_id == current_user.id)
     result = await db.execute(
-        select(Order).where(Order.id == order_id, Order.user_id == current_user.id)
-        .options(selectinload(Order.items).selectinload(OrderItem.product))
+        stmt.options(selectinload(Order.items).selectinload(OrderItem.product))
     )
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(404, "订单不存在")
 
-    items = [OrderItemResponse(
-        product_id=i.product_id, name=i.product.name, quantity=i.quantity,
-        unit_price=i.unit_price, image_url=i.product.image_url
-    ) for i in order.items]
+    items = _order_items(order)
 
     return ResponseModel(data=OrderResponse(
         id=order.id, total_amount=order.total_amount, status=order.status,
@@ -161,7 +266,10 @@ async def ship_order(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(404, "订单不存在")
-    if order.status == OrderStatus.PAID.value:
-        order.status = OrderStatus.SHIPPED.value
-        await db.commit()
-    return ResponseModel(data={"message": "发货成功"})
+    # 之前这里对「非待发货」的订单静默返回成功，管理员点一下以为发货了，
+    # 实际状态没变——现在明确报错，前端才能给出准确反馈
+    if order.status != OrderStatus.PAID.value:
+        raise HTTPException(400, f"只有「待发货」订单可以发货，当前状态：{order.status}")
+    order.status = OrderStatus.SHIPPED.value
+    await db.commit()
+    return ResponseModel(data={"message": "发货成功", "status": order.status})

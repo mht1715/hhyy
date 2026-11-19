@@ -1,7 +1,9 @@
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.core.media import normalize_image_url
 
 
 class ProductBase(BaseModel):
@@ -21,6 +23,12 @@ class ProductBase(BaseModel):
     adverse_reactions: str = ""
     approval_number: str
     manufacturer: str
+
+    @field_validator("image_url")
+    @classmethod
+    def _normalize_image(cls, value: Optional[str]) -> Optional[str]:
+        """历史数据里有反斜杠路径，接口出口统一纠正，前端才能正常显示。"""
+        return normalize_image_url(value)
 
 
 class ProductCreate(ProductBase):
@@ -44,6 +52,11 @@ class ProductUpdate(BaseModel):
     adverse_reactions: Optional[str] = None
     approval_number: Optional[str] = None
     manufacturer: Optional[str] = None
+
+    @field_validator("image_url")
+    @classmethod
+    def _normalize_image(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_image_url(value)
 
 
 class ProductResponse(ProductBase):

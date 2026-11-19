@@ -18,6 +18,7 @@ from app.api import (
     agents,
     auth,
     cart,
+    catalog,
     chat,
     conversations,
     feedback,
@@ -28,8 +29,10 @@ from app.api import (
     support,
     support_ws,
     upload,
+    workbench,
 )
 from app.core.config import settings
+from app.core.media import STATIC_ROOT, UPLOAD_ROOT
 from app.observability.tracing import get_trace_sink
 
 logger = logging.getLogger(__name__)
@@ -70,6 +73,8 @@ app.add_middleware(
 # 注册路由，注意这里的前缀必须和前端匹配
 app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(product.router, prefix="/api/products", tags=["Products"])
+# M5：公开药品目录（游客可逛，只读；加购仍走 /api/cart 并需要登录）
+app.include_router(catalog.router, prefix="/api/catalog", tags=["Catalog"])
 app.include_router(cart.router, prefix="/api/cart", tags=["Cart"])
 app.include_router(order.router, prefix="/api/orders", tags=["Orders"])
 app.include_router(agent.router, prefix="/api/agent", tags=["Agent"])
@@ -86,12 +91,18 @@ app.include_router(feedback.router, prefix="/api/chat", tags=["Feedback"])
 app.include_router(conversations.router, prefix="/api/conversations", tags=["Conversations"])
 app.include_router(memory.router, prefix="/api/me/memory", tags=["Memory"])
 app.include_router(handoff.router, prefix="/api/handoff", tags=["Handoff"])
+# M5：工作台聚合（/api/me/workbench、/api/public/stats、/api/support/stats）
+app.include_router(workbench.router, prefix="/api", tags=["Workbench"])
 app.include_router(support.router, prefix="/api/support", tags=["Support"])
 # WS 不走 /api 前缀：浏览器直连 /ws/support/{conversation_id}（Vite 已配代理）
 app.include_router(support_ws.router, tags=["Support-WS"])
 
-# 挂载静态文件目录，让浏览器可以直接访问 /static/xxx.jpg
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# 挂载静态文件目录，让浏览器可以直接访问 /static/uploads/xxx.png
+# 用绝对路径：``directory="static"`` 依赖启动时的 cwd，从仓库根启动就会建出
+# 一个空的 ``./static`` 并把真实目录挡在后面（表现为「图片 404」）
+STATIC_ROOT.mkdir(parents=True, exist_ok=True)
+UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(STATIC_ROOT)), name="static")
 
 
 @app.get("/health")

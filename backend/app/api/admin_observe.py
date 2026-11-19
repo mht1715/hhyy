@@ -28,6 +28,7 @@ from app.guardrail.compliance import looks_like_refusal
 from app.models.agent import Conversation, Message, MessageRole
 from app.models.eval import EvalRun
 from app.models.handoff import HandoffTicket, TicketStatus
+from app.models.kb import DocumentStatus, KbDocument
 from app.models.memory import UserMemory, UserProfile
 from app.models.user import User
 from app.schemas.response import ResponseModel
@@ -106,6 +107,49 @@ def _cost(usage: dict[str, Any]) -> float:
     )
 
 
+async def _daily_counts(db: AsyncSession, model, since: datetime) -> dict[str, int]:
+    """按天计数。用 ``func.date`` 而不是在 Python 里循环，省掉全表扫描。"""
+    rows = (
+        await db.execute(
+            select(func.date(model.created_at), func.count())
+            .where(model.created_at >= since)
+            .group_by(func.date(model.created_at))
+        )
+    ).all()
+    data: dict[str, int] = {}
+    for day, count in rows:
+        key = day.isoformat() if hasattr(day, "isoformat") else str(day)
+        data[key] = int(count)
+    return data
+
+
+def _trend(
+    days: int,
+    answered: list[Message],
+    conversations: dict[str, int],
+    tickets: dict[str, int],
+) -> list[dict[str, Any]]:
+    """近 N 天逐日趋势：给看板画折线用，一眼看出「哪天真出事了」。"""
+    today = datetime.utcnow().date()
+    start = today - timedelta(days=days - 1)
+    buckets: dict[str, dict[str, Any]] = {}
+    for offset in range(days):
+        key = (start + timedelta(days=offset)).isoformat()
+        buckets[key] = {"date": key, "turns": 0, "refusals": 0, "conversations": 0, "tickets": 0}
+    for item in answered:
+        key = item.created_at.date().isoformat() if item.created_at else ""
+        bucket = buckets.get(key)
+        if bucket is None:
+            continue
+        bucket["turns"] += 1
+        if _is_refusal(item):
+            bucket["refusals"] += 1
+    for key, bucket in buckets.items():
+        bucket["conversations"] = conversations.get(key, 0)
+        bucket["tickets"] = tickets.get(key, 0)
+    return [buckets[key] for key in sorted(buckets)]
+
+
 @router.get("/overview", response_model=ResponseModel[dict])
 async def overview(
     days: int = Query(default=7, ge=1, le=90),
@@ -147,6 +191,24 @@ async def overview(
     refusal_count = sum(1 for item in answered if _is_refusal(item))
     disclaimer_count = sum(1 for item in with_citations if DISCLAIMER in (item.content or ""))
     empty_count = len(messages) - len(answered)
+
+    # M5：工作台首屏要「今天该干什么」，所以除了总量还给逐日趋势与待办
+    conversation_daily = await _daily_counts(db, Conversation, since)
+    ticket_daily = await _daily_counts(db, HandoffTicket, since)
+    queued_tickets = (
+        await db.execute(
+            select(func.count())
+            .select_from(HandoffTicket)
+            .where(HandoffTicket.status == TicketStatus.QUEUED.value)
+        )
+    ).scalar_one()
+    failed_docs = (
+        await db.execute(
+            select(func.count())
+            .select_from(KbDocument)
+            .where(KbDocument.status == DocumentStatus.FAILED.value)
+        )
+    ).scalar_one()
 
     up = sum(1 for item in answered if (item.feedback or {}).get("rating") == "up")
     down = sum(1 for item in answered if (item.feedback or {}).get("rating") == "down")
@@ -217,6 +279,51 @@ async def overview(
             }
         )
 
+    # 待办：只保留「点进去能处理」的项。数量为 0 的也返回（前端自己决定要不要展示），
+    # 这样看板不会因为某天没异常就少一行、把布局抖一下。
+    todos = [
+        {
+            "key": "queued_tickets",
+            "label": "排队待接管工单",
+            "value": int(queued_tickets),
+            "tone": "warn" if queued_tickets else "ok",
+            "to": "/support",
+            "note": "坐席接管后可继续对话",
+        },
+        {
+            "key": "down_feedback",
+            "label": "未处理差评",
+            "value": down,
+            "tone": "danger" if down else "ok",
+            "to": "/admin/observe",
+            "note": "可导出为评估集候选",
+        },
+        {
+            "key": "guardrail_violations",
+            "label": "输出治理拦截",
+            "value": sum(violation_counter.values()),
+            "tone": "warn" if violation_counter else "ok",
+            "to": "/admin/observe",
+            "note": "合规改写 / 引用裁剪 / 拒答",
+        },
+        {
+            "key": "failed_documents",
+            "label": "解析失败文档",
+            "value": int(failed_docs),
+            "tone": "danger" if failed_docs else "ok",
+            "to": "/admin/kb",
+            "note": "失败文档不进检索",
+        },
+        {
+            "key": "eval_failures",
+            "label": "评估失败用例",
+            "value": int(eval_payload.get("failures") or 0),
+            "tone": "warn" if (eval_payload.get("failures") or 0) else "ok",
+            "to": "/admin/observe",
+            "note": "最近一次评估的失败条数",
+        },
+    ]
+
     return ResponseModel(
         data={
             "window_days": days,
@@ -228,6 +335,8 @@ async def overview(
                 "handoffs": tickets,
                 "open_tickets": open_tickets,
             },
+            "trend": _trend(days, answered, conversation_daily, ticket_daily),
+            "todos": todos,
             "latency": {
                 "p50_ms": _percentile(latencies, 0.50),
                 "p95_ms": _percentile(latencies, 0.95),
@@ -365,6 +474,77 @@ async def export_feedback(
             }
         )
     return ResponseModel(data=data)
+
+
+@router.get("/system", response_model=ResponseModel[dict])
+async def system_status(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = AdminOnly,
+):
+    """系统页：把「依赖是否真的通了」摊开给面试官看，而不是只显示绿灯图标。
+
+    ``/health`` 是给探针用的（无鉴权、极简）；这里补上**配置快照**，方便解释
+    「为什么这台机器召回是 0.94」——模型、维度、灰度开关都在这里。
+    """
+    from app.agent.checkpointer import get_checkpointer
+    from app.core.redis import redis_ping
+
+    db_ok = True
+    try:
+        await db.execute(select(func.now()))
+    except Exception:  # pragma: no cover - 只有依赖真的挂了才走到
+        db_ok = False
+
+    redis_ok = await redis_ping()
+    checkpointer_ok = False
+    if settings.checkpointer_enabled:
+        try:
+            checkpointer_ok = await get_checkpointer() is not None
+        except Exception:  # pragma: no cover
+            checkpointer_ok = False
+
+    components = [
+        {"key": "database", "label": "PostgreSQL + pgvector", "ok": db_ok},
+        {"key": "redis", "label": "Redis（事件总线 / 限流）", "ok": bool(redis_ok)},
+        {
+            "key": "checkpointer",
+            "label": "LangGraph 检查点",
+            "ok": checkpointer_ok or not settings.checkpointer_enabled,
+        },
+        {
+            "key": "milvus",
+            "label": "Milvus 向量库",
+            "ok": bool(settings.milvus_uri),
+        },
+        {
+            "key": "langfuse",
+            "label": "Langfuse 链路追踪",
+            "ok": bool(settings.langfuse_base_url and settings.langfuse_public_key),
+        },
+    ]
+
+    return ResponseModel(
+        data={
+            "components": components,
+            "config": {
+                "chat_model": settings.deepseek_chat_model,
+                "embedding_model": settings.dashscope_embedding_model,
+                "embedding_dimensions": settings.embedding_dimensions,
+                "rerank_model": settings.rerank_model if settings.rerank_enabled else "已关闭",
+                "rag_collection": settings.rag_collection,
+                "memory_collection": settings.memory_collection,
+                "memory_enabled": settings.memory_enabled,
+                "memory_window_turns": settings.memory_window_turns,
+                "memory_history_budget": settings.memory_history_budget,
+                "checkpointer_enabled": settings.checkpointer_enabled,
+                "supervisor_enabled": settings.supervisor_enabled,
+                "supervisor_confidence_floor": settings.supervisor_confidence_floor,
+                "rerank_score_threshold": settings.rerank_score_threshold,
+                "llm_timeout": settings.llm_timeout,
+            },
+            "generated_at": iso_utc(datetime.utcnow()),
+        }
+    )
 
 
 __all__ = ["router", "FEEDBACK_REASONS", "DEFINITIONS"]
