@@ -2,13 +2,17 @@
 import {ref, computed, onMounted} from 'vue'
 import {useRouter, useRoute} from 'vue-router'
 import {useCartStore} from '../store/cart'
+import {useAuthStore} from '../store/auth'
 import {showToast} from 'vant'
 import {ArrowLeft, MapPin} from 'lucide-vue-next'
 import {checkoutApi} from '../api/order' // 引入支付 API
+import {goBackOr} from '../utils/nav'
+import {resolveHomePath} from '../utils/permission'
 
 const router = useRouter()
 const route = useRoute()
 const cartStore = useCartStore()
+const auth = useAuthStore()
 
 const payStatus = ref('unpaid') // unpaid | paying | success
 const orderNo = ref('')
@@ -65,10 +69,12 @@ const handlePay = async () => {
     sessionStorage.removeItem('checkout_items')
     await cartStore.fetchCart() // 刷新购物车
 
-    // 延迟跳转订单页
-    setTimeout(() => {
-      router.replace('/orders')
-    }, 2000)
+    // 延迟跳回「我的订单」：患者直接回工作台的订单 Tab，
+    // 工作台是 KeepAlive 缓存的，onActivated 里会重新拉一次统计与订单，
+    // 所以「下完单回来数字没变」的问题在这里和 PatientView 两边一起兜住
+    window.setTimeout(() => {
+      router.replace(afterPaidTarget.value)
+    }, 2200)
 
   } catch (e) {
     payStatus.value = 'unpaid'
@@ -76,7 +82,14 @@ const handlePay = async () => {
   }
 }
 
-const goHome = () => router.push('/')
+// 付款成功后去哪：患者回工作台订单 Tab，其它角色回「我的订单」
+const afterPaidTarget = computed(() => (
+    auth.role === 'patient'
+        ? {path: '/patient', query: {tab: 'orders'}}
+        : {path: '/orders'}
+))
+
+const goHome = () => router.push(resolveHomePath(auth.role))
 
 onMounted(() => {
   // 如果是购物车模式，刷新一下购物车数据防丢失
@@ -89,7 +102,7 @@ onMounted(() => {
 <template>
   <div class="checkout-page">
     <div class="nav-bar">
-      <div class="back-btn" @click="router.back()">
+      <div class="back-btn" @click="goBackOr(router, '/cart')">
         <ArrowLeft :size="24"/>
       </div>
       <div class="title">{{ payStatus === 'success' ? '支付结果' : '确认订单' }}</div>
@@ -101,7 +114,13 @@ onMounted(() => {
       <h2 class="success-title">支付成功</h2>
       <p class="success-amount">¥{{ paidAmount.toFixed(2) }}</p>
       <p class="success-order">订单号：{{ orderNo }}</p>
-      <p style="color: #999; font-size: 13px;">即将跳转我的订单...</p>
+      <p style="color: #999; font-size: 13px;">即将跳转{{ auth.role === 'patient' ? '工作台订单页' : '我的订单' }}...</p>
+
+      <!-- 自动跳转之外给两个明确出口：等待 2 秒什么也不做也有人会以为卡住了 -->
+      <div class="success-actions">
+        <van-button round type="danger" @click="router.replace(afterPaidTarget)">查看订单</van-button>
+        <van-button round plain type="danger" @click="router.replace('/drugs')">继续逛逛</van-button>
+      </div>
     </div>
 
     <!-- 结算状态 -->
@@ -393,6 +412,16 @@ onMounted(() => {
       background: #f3f4f6;
       padding: 6px 16px;
       border-radius: 16px;
+    }
+
+    .success-actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 8px;
+
+      .van-button {
+        min-width: 120px;
+      }
     }
   }
 }

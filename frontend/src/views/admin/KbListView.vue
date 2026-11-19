@@ -1,4 +1,7 @@
 <script setup>
+// KeepAlive 依赖组件名（App.vue 的 CACHED 白名单按 name 匹配）
+defineOptions({name: 'KbListView'})
+
 import {ref, computed, onMounted} from 'vue'
 import {useRouter} from 'vue-router'
 import {showToast, showConfirmDialog} from 'vant'

@@ -2,7 +2,9 @@
 import {computed, ref} from 'vue'
 import {useAuthStore} from '../store/auth'
 import {useRoute, useRouter} from 'vue-router'
-import {Bot, Brain, ChevronDown, Headphones, Hexagon, LogOut, RefreshCw, UserCircle} from 'lucide-vue-next'
+import {Bot, Brain, ChevronDown, Headphones, Hexagon, LayoutDashboard, LogOut, Pill, RefreshCw, UserCircle} from 'lucide-vue-next'
+import {resolveHomePath} from '../utils/permission'
+import {openGuide} from '../store/guide'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -10,6 +12,11 @@ const router = useRouter()
 const isDropdownOpen = ref(false)
 
 const isAgentsActive = computed(() => route.path === '/agents' || route.path.startsWith('/agents/'))
+const isDrugsActive = computed(() => route.path === '/drugs' || route.path.startsWith('/product/'))
+
+// M5：登录后顶栏常驻「工作台」入口——之前只有下拉菜单里能找到，等于藏起来了
+const homePath = computed(() => resolveHomePath(auth.role))
+const isWorkbenchActive = computed(() => !!homePath.value && homePath.value !== '/' && route.path.startsWith(homePath.value))
 
 // M3：support / admin 才能进客服工作台
 const isSupportRole = computed(() => ['support', 'admin'].includes(auth.role))
@@ -57,14 +64,25 @@ const roleNameMap = {admin: '管理员', doctor: '医生', patient: '患者', su
     <!-- 左侧 Logo 不变 -->
     <div class="left-brand">
       <Hexagon color="#ef4444" :size="28" fill="#ef4444"/>
-      <span class="brand-name">花红agent（demo）</span>
+      <span class="brand-name">花红<span class="brand-sub">agent（demo）</span></span>
     </div>
 
     <nav class="nav-links">
+      <RouterLink v-if="auth.isLoggedIn && homePath !== '/'" :to="homePath" class="nav-link" :class="{ active: isWorkbenchActive }">
+        <LayoutDashboard :size="16"/>
+        <span>工作台</span>
+      </RouterLink>
+      <RouterLink to="/drugs" class="nav-link" :class="{ active: isDrugsActive }">
+        <Pill :size="16"/>
+        <span>药品广场</span>
+      </RouterLink>
       <RouterLink to="/agents" class="nav-link" :class="{ active: isAgentsActive }">
         <Bot :size="16"/>
         <span>Agent 广场</span>
       </RouterLink>
+      <button type="button" class="mvp-chip" title="这个版本在演示什么" @click="openGuide('intro')">
+        MVP 演示
+      </button>
     </nav>
 
     <div class="right-user">
@@ -147,6 +165,17 @@ const roleNameMap = {admin: '管理员', doctor: '医生', patient: '患者', su
       font-weight: 700;
       color: #1f2937;
       letter-spacing: 0.5px;
+      display: inline-flex;
+      align-items: baseline;
+      gap: 4px;
+
+      /* demo 后缀在窄屏隐藏：顶栏要放三个入口，品牌名不该占掉一半宽度 */
+      .brand-sub {
+        font-size: 12px;
+        font-weight: 500;
+        color: #9ca3af;
+        letter-spacing: 0;
+      }
     }
   }
 
@@ -177,6 +206,26 @@ const roleNameMap = {admin: '管理员', doctor: '医生', patient: '患者', su
       &.active {
         background: #fef2f2;
         color: #b91c1c;
+      }
+    }
+
+    /* 顶栏常驻的 MVP 徽标：点了打开导览，比单独放一个浮标更不打扰 */
+    .mvp-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 9px;
+      border: 1px dashed #fca5a5;
+      border-radius: 999px;
+      background: #fff;
+      color: #dc2626;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background-color 0.2s;
+
+      &:hover {
+        background: #fef2f2;
       }
     }
   }
@@ -299,32 +348,51 @@ const roleNameMap = {admin: '管理员', doctor: '医生', patient: '患者', su
 
 @media (max-width: 768px) {
   .navbar {
-    padding: 0 12px !important; // 减小两侧留白
+    padding: 0 10px !important; // 减小两侧留白
 
     .left-brand {
-      gap: 8px !important;
+      gap: 6px !important;
+      flex-shrink: 0;
+
+      svg {
+        width: 22px !important;
+        height: 22px !important;
+      }
 
       .brand-name {
-        font-size: 15px !important; // 调小 Logo 文字，给广场入口留位置
-      }
-    }
+        font-size: 15px !important; // 调小 Logo 文字，给三个入口留位置
 
-    .nav-links {
-      margin-right: 6px !important;
-
-      .nav-link {
-        gap: 3px !important;
-        padding: 4px 8px !important;
-        font-size: 11px !important;
-
-        svg {
-          width: 14px;
-          height: 14px;
+        /* 手机上顶栏要放「工作台 / 药品 / Agent」三个入口，demo 后缀先让位 */
+        .brand-sub {
+          display: none;
         }
       }
     }
 
+    .nav-links {
+      margin-right: 4px !important;
+      gap: 0 !important;
+
+      .nav-link {
+        gap: 3px !important;
+        padding: 4px 6px !important;
+        font-size: 11px !important;
+
+        svg {
+          width: 13px;
+          height: 13px;
+        }
+      }
+
+      /* 手机上顶栏已经很挤，MVP 说明交给右下角浮标 */
+      .mvp-chip {
+        display: none;
+      }
+    }
+
     .right-user {
+      flex-shrink: 0;
+
       .login-btn {
         padding: 6px 10px !important;
         font-size: 12px !important;
@@ -333,7 +401,7 @@ const roleNameMap = {admin: '管理员', doctor: '医生', patient: '患者', su
 
       .user-profile {
         .profile-trigger {
-          padding: 4px 8px !important;
+          padding: 4px 4px !important;
           gap: 4px !important;
 
           .username {
@@ -341,11 +409,24 @@ const roleNameMap = {admin: '管理员', doctor: '医生', patient: '患者', su
           }
 
           .role-badge {
-            font-size: 11px !important;
-            padding: 1px 6px !important;
+            font-size: 10px !important;
+            padding: 1px 5px !important;
           }
         }
       }
+    }
+  }
+}
+
+/* 超窄屏（≈360px）：入口只留图标，避免文字挤成两行 */
+@media (max-width: 380px) {
+  .navbar {
+    .nav-links .nav-link span {
+      display: none;
+    }
+
+    .nav-links .nav-link {
+      padding: 6px !important;
     }
   }
 }

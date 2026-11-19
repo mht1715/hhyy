@@ -1,4 +1,7 @@
 <script setup>
+// KeepAlive 依赖组件名（App.vue 的 CACHED 白名单按 name 匹配）
+defineOptions({name: 'ServiceView'})
+
 /**
  * 我的会话（M3 低成本改造）：
  * 用 GET /api/conversations 列出自己的会话，点开就地展开历史消息（只读），
@@ -6,10 +9,11 @@
  */
 import {onMounted, ref} from 'vue'
 import {useRouter} from 'vue-router'
-import {ArrowRight, ChevronDown, MessageSquare, RefreshCw} from 'lucide-vue-next'
+import {ArrowLeft, ArrowRight, ChevronDown, MessageSquare, RefreshCw} from 'lucide-vue-next'
 import dayjs from 'dayjs'
 import Navbar from '../components/Navbar.vue'
 import {fetchConversation, fetchConversations} from '../api/support'
+import {goBackOr} from '../utils/nav'
 
 const router = useRouter()
 
@@ -120,6 +124,10 @@ onMounted(load)
       <header class="page-head">
         <div class="head-text">
           <div class="head-title">
+            <!-- 之前从客服会话进来只能靠浏览器后退 -->
+            <button type="button" class="back-btn" aria-label="返回上一页" @click="goBackOr(router, '/patient')">
+              <ArrowLeft :size="18"/>
+            </button>
             <span class="head-icon">
               <MessageSquare :size="16" color="#fff"/>
             </span>
@@ -237,6 +245,24 @@ onMounted(load)
       display: flex;
       align-items: center;
       gap: 8px;
+
+      .back-btn {
+        display: grid;
+        place-items: center;
+        width: 30px;
+        height: 30px;
+        padding: 0;
+        border: 1px solid #e5e7eb;
+        border-radius: 50%;
+        background: #fff;
+        color: #4b5563;
+        cursor: pointer;
+
+        &:hover {
+          border-color: #fecaca;
+          color: #dc2626;
+        }
+      }
 
       h1 {
         font-size: 17px;

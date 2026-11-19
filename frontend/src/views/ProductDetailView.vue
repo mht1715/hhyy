@@ -8,6 +8,8 @@ import {ArrowLeft, Headphones} from 'lucide-vue-next'
 import CartFloating from '../components/cart/CartFloating.vue'
 import DrugAIAssistant from '../components/product/DrugAIAssistant.vue'
 import {useAuthStore} from '../store/auth'
+import {imageUrl} from '../utils/image'
+import {goBackOr} from '../utils/nav'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -16,6 +18,9 @@ const cartStore = useCartStore()
 
 const product = ref(null)
 const loading = ref(true)
+
+// 直接打开链接（分享/刷新）时 history 里没有上一条，router.back() 会把用户送出站外
+const goBack = () => goBackOr(router, '/drugs')
 
 
 const loadDetail = async () => {
@@ -32,8 +37,7 @@ const loadDetail = async () => {
 
 const handlePreview = () => {
   if (!product.value) return
-  const imgUrl = product.value.image_url || 'https://fastly.jsdelivr.net/npm/@vant/assets/cat.jpeg'
-  showImagePreview([imgUrl])
+  showImagePreview([imageUrl(product.value.image_url)])
 }
 
 const addToCart = async () => {
@@ -82,18 +86,20 @@ onMounted(async () => {
     cartStore.fetchCart()
   }
 })
-
-onMounted(loadDetail)
 </script>
 
 <template>
   <div class="detail-page">
     <!-- 顶部返回栏 -->
     <div class="nav-bar">
-      <div class="back-btn" @click="router.back()">
+      <div class="back-btn" @click="goBack">
         <ArrowLeft :size="24"/>
       </div>
       <div class="title">药品详情</div>
+      <!-- 直接打开链接时没有上一页，给一个明确出口，别让用户卡在详情页 -->
+      <button type="button" class="nav-link" @click="router.push('/drugs')">
+        药品广场
+      </button>
     </div>
 
     <div v-if="loading" style="padding: 100px; text-align: center;">加载中...</div>
@@ -104,7 +110,7 @@ onMounted(loadDetail)
         <!-- 商品主图与基础信息 -->
         <div class="product-header">
           <van-image
-              :src="product.image_url || 'https://fastly.jsdelivr.net/npm/@vant/assets/cat.jpeg'"
+              :src="imageUrl(product.image_url)"
               fit="contain"
               class="main-img"
               @click="handlePreview"
@@ -187,21 +193,43 @@ onMounted(loadDetail)
     z-index: 10;
     display: flex;
     align-items: center;
+    justify-content: space-between;
     background: #fff;
     height: 46px;
-    padding: 0 16px;
+    padding: 0 12px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 
     .back-btn {
       cursor: pointer;
+      display: grid;
+      place-items: center;
+      width: 32px;
+      height: 32px;
     }
 
+    /* 标题绝对居中：左侧返回、右侧出口宽度不同，用 flex 居中会偏 */
     .title {
-      flex: 1;
-      text-align: center;
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
       font-size: 16px;
       font-weight: 600;
-      margin-right: 24px;
+      pointer-events: none;
+    }
+
+    .nav-link {
+      padding: 4px 10px;
+      border: 1px solid #fecaca;
+      border-radius: 999px;
+      background: #fff;
+      color: #b91c1c;
+      font-size: 12px;
+      cursor: pointer;
+      white-space: nowrap;
+
+      &:hover {
+        background: #fef2f2;
+      }
     }
   }
 

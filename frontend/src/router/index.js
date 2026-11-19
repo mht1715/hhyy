@@ -80,7 +80,18 @@ const routes = [
         path: '/products',
         name: 'Products',
         component: () => import('../views/ProductView.vue'),
-        meta: {requiresAuth: true, roles: ['admin', 'doctor']} // 允许的多个角色
+        meta: {requiresAuth: true, roles: ['admin', 'doctor']} // 后台维护，患者看 /drugs
+    },
+    // M5：药品广场（公开，游客可逛）与购物车
+    {
+        path: '/drugs',
+        name: 'Drugs',
+        component: () => import('../views/DrugsView.vue')
+    },
+    {
+        path: '/cart',
+        name: 'Cart',
+        component: () => import('../views/CartView.vue')
     },
     {
         path: '/product/:id',
@@ -129,7 +140,44 @@ const routes = [
 
 const router = createRouter({
     history: createWebHistory(),
-    routes
+    routes,
+    // 前进/后退用浏览器记住的位置；同一页面换 query（?tab=）保持不跳顶
+    scrollBehavior(to, from, savedPosition) {
+        if (savedPosition) return savedPosition
+        if (to.path === from.path) return false
+        return {top: 0}
+    }
+})
+
+/**
+ * 跨页面返回时恢复滚动位置。
+ *
+ * KeepAlive 保住了组件状态，但浏览器不会替你记住「刚才滚到哪」。
+ * 用一个有界 Map 记录离开时的 scrollY，返回时还原——比在每个页面里写一遍
+ * onBeforeRouteLeave/onActivated 可靠，也不会漏。
+ */
+const MAX_SCROLL_MEMORY = 40
+const scrollMemory = new Map()
+
+router.beforeEach((to, from) => {
+    if (typeof window === 'undefined' || !from.name) return true
+    scrollMemory.set(from.fullPath, window.scrollY || 0)
+    if (scrollMemory.size > MAX_SCROLL_MEMORY) {
+        const oldest = scrollMemory.keys().next().value
+        scrollMemory.delete(oldest)
+    }
+    return true
+})
+
+router.afterEach((to, from) => {
+    // 同一页面只换 query（切 Tab）不该跳回旧位置
+    if (to.path === from.path) return
+    const remembered = scrollMemory.get(to.fullPath)
+    if (remembered === undefined || remembered <= 0) return
+    // 等 KeepAlive 的 DOM 挂回来再滚，否则高度还是 0
+    window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => window.scrollTo({top: remembered, behavior: 'auto'}))
+    })
 })
 
 // 路由守卫：登录态 + 角色校验

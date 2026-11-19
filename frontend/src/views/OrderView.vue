@@ -1,105 +1,114 @@
 <script setup>
-import {ref, onMounted, computed} from 'vue'
+// KeepAlive 依赖组件名（App.vue 的 CACHED 白名单按 name 匹配）
+defineOptions({name: 'OrderView'})
+
+/**
+ * 我的订单（独立页）。
+ *
+ * 订单卡本身复用 components/order/OrderCard.vue —— 患者工作台、管理员订单管理
+ * 用的是同一个组件，状态文案 / 图片兜底 / 点击进详情的行为只有一份实现。
+ */
+import {computed, onActivated, onMounted, ref} from 'vue'
 import {useRouter} from 'vue-router'
-import {getMyOrdersApi} from '../api/order'
-import {ArrowLeft, Copy} from 'lucide-vue-next'
+import {ArrowLeft} from 'lucide-vue-next'
 import {showToast} from 'vant'
-import OrderItem from '../components/order/OrderItem.vue'
+import {getMyOrdersApi} from '../api/order'
+import OrderCard from '../components/order/OrderCard.vue'
+import {ORDER_FILTERS, normalizeOrderStatus} from '../utils/orderStatus'
+import {goBackOr} from '../utils/nav'
 
 const router = useRouter()
 const orders = ref([])
 const loading = ref(true)
+const errorText = ref('')
 const activeTab = ref('all')
 
-// 兼容大小写
-const statusMap = {
-  'PENDING': {text: '待付款', color: '#ff976a'},
-  'PAID': {text: '待发货', color: '#ee0a24'},
-  'SHIPPED': {text: '待收货', color: '#1989fa'},
-  'COMPLETED': {text: '已完成', color: '#07c160'},
-  'CANCELLED': {text: '已取消', color: '#969799'}
-}
-
-const getStatus = (status) => {
-  if (!status) return {text: '未知', color: '#999'}
-  return statusMap[status.toUpperCase()] || {text: status, color: '#999'}
-}
-
-const tabs = [
-  {name: 'all', title: '全部'},
-  {name: 'PAID', title: '待发货'},
-  {name: 'SHIPPED', title: '待收货'},
-  {name: 'COMPLETED', title: '已完成'}
-]
+const TABS = ORDER_FILTERS
 
 const filteredOrders = computed(() => {
   if (activeTab.value === 'all') return orders.value
-  return orders.value.filter(o => o.status.toUpperCase() === activeTab.value)
+  return orders.value.filter((o) => normalizeOrderStatus(o.status) === activeTab.value)
+})
+
+const counts = computed(() => {
+  const result = {}
+  orders.value.forEach((order) => {
+    const key = normalizeOrderStatus(order.status)
+    result[key] = (result[key] || 0) + 1
+  })
+  return result
 })
 
 const loadOrders = async () => {
   loading.value = true
+  errorText.value = ''
   try {
-    orders.value = await getMyOrdersApi()
+    const data = await getMyOrdersApi()
+    orders.value = Array.isArray(data) ? data : []
   } catch (e) {
+    errorText.value = '订单加载失败，请稍后重试'
     showToast('获取订单失败')
   } finally {
     loading.value = false
   }
 }
 
-// 复制订单号
-const copyOrderId = (id) => {
-  navigator.clipboard.writeText(id).then(() => {
-    showToast('订单号已复制')
-  }).catch(() => {
-    showToast('复制失败')
-  })
+const goDetail = (order) => {
+  if (order && order.id) router.push(`/orders/${order.id}`)
 }
 
 onMounted(loadOrders)
+
+// 从订单详情返回时状态可能已经变了（取消 / 收货），重新拉一次
+let activatedOnce = false
+onActivated(() => {
+  if (!activatedOnce) {
+    activatedOnce = true
+    return
+  }
+  loadOrders()
+})
 </script>
 
 <template>
   <div class="order-page">
     <div class="nav-bar">
-      <div class="back-btn" @click="router.back()">
-        <ArrowLeft :size="24"/>
-      </div>
+      <button type="button" class="back-btn" aria-label="返回上一页" @click="goBackOr(router, '/patient')">
+        <ArrowLeft :size="22"/>
+      </button>
       <div class="title">我的订单</div>
     </div>
 
     <van-tabs v-model:active="activeTab" sticky offset-top="46" color="#ef4444" title-active-color="#ef4444">
-      <van-tab v-for="tab in tabs" :key="tab.name" :title="tab.title" :name="tab.name"/>
+      <van-tab v-for="tab in TABS" :key="tab.key" :title="tab.label" :name="tab.key">
+        <template v-if="tab.key !== 'all' && counts[tab.key]" #title>
+          {{ tab.label }}
+          <span class="tab-count">{{ counts[tab.key] }}</span>
+        </template>
+      </van-tab>
     </van-tabs>
 
     <div class="order-list">
-      <van-empty v-if="!loading && filteredOrders.length === 0" description="暂无相关订单"/>
-
-      <div class="order-card" v-for="order in filteredOrders" :key="order.id">
-        <div class="order-header">
-          <div class="order-no">
-            <span>订单号：{{ order.id }}</span>
-            <Copy :size="14" class="copy-icon" @click="copyOrderId(order.id)"/>
-          </div>
-          <span class="order-status" :style="{ color: getStatus(order.status).color }">
-            {{ getStatus(order.status).text }}
-          </span>
-        </div>
-
-        <div class="order-items">
-          <OrderItem v-for="item in order.items" :key="item.product_id" :item="item"/>
-        </div>
-
-        <div class="order-footer">
-          <div class="total-info">
-            共 {{ order.items.length }} 件商品，实付：<span class="total">¥{{ order.total_amount.toFixed(2) }}</span>
-          </div>
-          <van-button size="small" plain type="danger" round @click="router.push(`/orders/${order.id}`)">
-            查看详情
-          </van-button>
-        </div>
+      <div v-if="loading" class="state-box">
+        <van-loading type="dots" color="#ef4444"/>
+        <span>正在加载订单…</span>
       </div>
+
+      <div v-else-if="errorText" class="state-box">
+        <span>{{ errorText }}</span>
+        <button type="button" class="retry-btn" @click="loadOrders">重试</button>
+      </div>
+
+      <van-empty v-else-if="filteredOrders.length === 0" description="暂无相关订单"/>
+
+      <template v-else>
+        <OrderCard
+            v-for="order in filteredOrders"
+            :key="order.id"
+            :order="order"
+            @open="goDetail"
+        />
+      </template>
     </div>
   </div>
 </template>
@@ -120,9 +129,17 @@ onMounted(loadOrders)
     align-items: center;
     background: #fff;
     height: 46px;
-    padding: 0 16px;
+    padding: 0 12px;
 
     .back-btn {
+      display: grid;
+      place-items: center;
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      border: none;
+      background: transparent;
+      color: #4b5563;
       cursor: pointer;
     }
 
@@ -131,70 +148,49 @@ onMounted(loadOrders)
       text-align: center;
       font-size: 16px;
       font-weight: 600;
-      margin-right: 24px;
+      margin-right: 32px;
     }
   }
 
+  .tab-count {
+    margin-left: 2px;
+    font-size: 11px;
+    color: #dc2626;
+  }
+
   .order-list {
-    max-width: 800px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-width: 820px;
     margin: 0 auto;
     padding: 16px;
+    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  }
 
-    .order-card {
+  .state-box {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 200px;
+    font-size: 13px;
+    color: #6b7280;
+
+    .retry-btn {
+      padding: 3px 12px;
+      border: 1px solid #fecaca;
+      border-radius: 6px;
       background: #fff;
-      border-radius: 12px;
-      margin-bottom: 16px;
-      overflow: hidden;
-      padding-bottom: 12px;
+      color: #b91c1c;
+      font-size: 12px;
+      cursor: pointer;
+    }
+  }
 
-      .order-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 12px 16px;
-        background: #f9f9f9;
-        font-size: 13px;
-        color: #666;
-
-        .order-no {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-
-          .copy-icon {
-            cursor: pointer;
-
-            &:hover {
-              color: #ef4444;
-            }
-          }
-        }
-
-        .order-status {
-          font-weight: bold;
-        }
-      }
-
-      .order-items {
-        padding: 0 16px;
-      }
-
-      .order-footer {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 12px 16px;
-        border-top: 1px solid #f3f4f6;
-        margin-top: 12px;
-        font-size: 13px;
-        color: #333;
-
-        .total {
-          font-size: 18px;
-          font-weight: bold;
-          color: #ee0a24;
-        }
-      }
+  @media (max-width: 768px) {
+    .order-list {
+      padding: 12px;
     }
   }
 }

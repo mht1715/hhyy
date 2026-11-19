@@ -30,6 +30,9 @@ const route = useRoute()
 const router = useRouter()
 
 const input = ref('')
+// M5：支持从工作台「快捷提问」带问题进来（?q=）。只预填、不自动发送——
+// 自动发送会让用户来不及看清当前是哪个 Agent，也容易一进页面就撞限流。
+if (route.query.q) input.value = String(route.query.q)
 const agents = ref([])
 const devOpen = ref(false)
 

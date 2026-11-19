@@ -27,4 +27,17 @@ export const fetchRecent = (limit = 20) => {
   return requestJson(`/api/admin/observe/recent?limit=${encodeURIComponent(String(value))}`)
 }
 
-export default {fetchOverview, fetchRecent}
+/**
+ * GET /api/admin/observe/feedback/export?days=30&rating=down
+ * 把差评导出成「评估集候选」：前端直接下载 JSON，人工确认后并进 golden set。
+ * @returns {Promise<Array>} [{question, answer, agent_code, expected_docs, rating, reason, ...}]
+ */
+export const exportFeedback = (days = 30, rating = 'down') => {
+  const d = Number(days) || 30
+  const r = String(rating || 'down')
+  return requestJson(
+    `/api/admin/observe/feedback/export?days=${encodeURIComponent(String(d))}&rating=${encodeURIComponent(r)}`
+  )
+}
+
+export default {fetchOverview, fetchRecent, exportFeedback}

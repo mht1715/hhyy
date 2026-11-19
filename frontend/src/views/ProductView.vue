@@ -1,16 +1,21 @@
 <script setup>
+// KeepAlive 依赖组件名（App.vue 的 CACHED 白名单按 name 匹配）
+defineOptions({name: 'ProductView'})
+
 import {ref, onMounted, computed} from 'vue'
-import {useRouter} from 'vue-router'
+import {useRoute, useRouter} from 'vue-router'
 import Navbar from '../components/Navbar.vue'
 import {showToast, showConfirmDialog} from 'vant'
 import {getProductsApi, createProductApi, updateProductApi, deleteProductApi} from '../api/product'
 import {parseProductApi} from '../api/agent'
+import {goBackOr} from '../utils/nav'
 
 import AgentInput from '../components/common/AgentInput.vue'
 import ProductFormModal from '../components/product/ProductFormModal.vue'
 import ProductCard from '../components/product/ProductCard.vue'
 
 const router = useRouter()
+const route = useRoute()
 const products = ref([])
 const loading = ref(false)
 
@@ -19,13 +24,18 @@ const isEdit = ref(false)
 const currentFormData = ref({})
 const isParsing = ref(false)
 
-// 全局共用的 AI 输入文本
-const sharedAgentText = ref(`帮我录个板蓝根颗粒，袋装的，卖25块，原价30，库存还有800件。
+// 全局共用的 AI 输入文本。Agent 广场的「药品录入助手」会带 ?q= 过来，
+// 带过来就优先用它的示例，省得面试官自己编一段药品描述。
+const DEFAULT_AGENT_TEXT = `帮我录个板蓝根颗粒，袋装的，卖25块，原价30，库存还有800件。
 这药属于呼吸系统用药，是颗粒剂，规格是10克×20小袋，能放24个月。
 功能主治是清热解毒、凉血利咽，用来治咽喉肿痛、口干咽燥，还有急性扁桃体炎。
 成份是板蓝根，辅料有蔗糖和糊精。吃法是开水冲服，一次5到10克，一天3到4次。
 禁忌和不良反应都没啥，写尚不明确就行。批号是国药准字Z45020920。
-厂家是广西壮族自治区花红药业集团股份公司。`)
+厂家是广西壮族自治区花红药业集团股份公司。`
+
+const sharedAgentText = ref(
+    route.query.q ? String(route.query.q) : DEFAULT_AGENT_TEXT
+)
 
 const activeCategory = ref('全部')
 const categories = [
@@ -124,7 +134,7 @@ onMounted(loadProducts)
 
     <div class="header-container">
       <div class="header-actions">
-        <van-button icon="arrow-left" plain size="small" @click="router.back()">返回</van-button>
+        <van-button icon="arrow-left" plain size="small" @click="goBackOr(router, '/admin')">返回</van-button>
         <div class="title">药品库管理</div>
         <van-button v-permission="['admin', 'doctor']" type="danger" size="small" icon="plus" round @click="openCreate">
           录入
@@ -146,6 +156,7 @@ onMounted(loadProducts)
         <ProductCard
             v-for="item in filteredProducts"
             :key="item.id"
+            variant="manage"
             :item="item"
             @edit="openEdit"
             @delete="handleDelete"

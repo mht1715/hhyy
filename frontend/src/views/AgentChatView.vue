@@ -4,6 +4,7 @@ import {useRoute, useRouter} from 'vue-router'
 import {ArrowLeft} from 'lucide-vue-next'
 import Navbar from '../components/Navbar.vue'
 import AgentChat from '../components/agent/AgentChat.vue'
+import {goBackOr} from '../utils/nav'
 
 const route = useRoute()
 const router = useRouter()
@@ -30,9 +31,9 @@ const chatKey = computed(() => `${agentCode.value}-${context.value.product_id ||
 
     <div class="page-container">
       <div class="top-bar">
-        <button type="button" class="back-link" @click="router.push('/agents')">
+        <button type="button" class="back-link" @click="goBackOr(router, '/agents')">
           <ArrowLeft :size="16"/>
-          Agent 广场
+          返回
         </button>
       </div>
 

@@ -3,10 +3,12 @@ import {computed} from 'vue'
 import {ArrowUpRight} from 'lucide-vue-next'
 
 const props = defineProps({
-  agent: {type: Object, required: true}
+  agent: {type: Object, required: true},
+  // 示例提问：点一下直接进对话并预填，避免访客面对空输入框不知道问什么
+  samples: {type: Array, default: () => []}
 })
 
-const emit = defineEmits(['select'])
+const emit = defineEmits(['select', 'ask'])
 
 const name = computed(() => props.agent.name || props.agent.code || 'Agent')
 const code = computed(() => props.agent.code || props.agent.agent_code || '')
@@ -52,6 +54,19 @@ const go = () => emit('select', props.agent)
       <span v-for="capability in capabilities" :key="capability" class="cap-tag">
         {{ capability }}
       </span>
+    </div>
+
+    <div v-if="samples.length" class="samples" @click.stop>
+      <span class="samples-label">试试这样问</span>
+      <button
+          v-for="text in samples"
+          :key="text"
+          type="button"
+          class="sample-chip"
+          @click.stop="emit('ask', text)"
+      >
+        {{ text }}
+      </button>
     </div>
 
     <div class="card-foot">
@@ -189,6 +204,41 @@ const go = () => emit('select', props.agent)
 
     .entry-arrow {
       transition: transform 0.2s ease;
+    }
+  }
+
+  .samples {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 12px;
+
+    .samples-label {
+      flex: 0 0 100%;
+      font-size: 11px;
+      color: #9ca3af;
+    }
+
+    .sample-chip {
+      max-width: 100%;
+      padding: 3px 10px;
+      border: 1px dashed #fecaca;
+      border-radius: 999px;
+      background: #fff;
+      color: #b91c1c;
+      font-size: 12px;
+      line-height: 1.5;
+      text-align: left;
+      cursor: pointer;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      transition: background-color 0.16s ease, border-color 0.16s ease;
+
+      &:hover {
+        background: #fef2f2;
+        border-color: #fca5a5;
+      }
     }
   }
 

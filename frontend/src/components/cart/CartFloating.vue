@@ -5,6 +5,7 @@ import {useCartStore} from '../../store/cart'
 import {useAuthStore} from '../../store/auth'
 import {ShoppingCart, Trash2} from 'lucide-vue-next'
 import {showToast} from 'vant'
+import CartItem from './CartItem.vue'
 
 const router = useRouter()
 const cartStore = useCartStore()
@@ -47,10 +48,19 @@ const checkedTotalPrice = computed(() => {
 })
 
 // 修改数量
-const handleQuantityChange = (item, val) => {
-  // 将字符串转为数字并确保至少为 1
-  const numVal = Math.max(1, Number(val))
-  cartStore.updateQuantity(item.id, numVal)
+const handleQuantityChange = (item, next) => {
+  const quantity = Math.max(1, Math.floor(Number(next) || 1))
+  cartStore.updateQuantity(item.id, quantity)
+}
+
+// 单行的勾选框由 CartItem 提供，这里维护选中集合（全选 / 合计都依赖它）
+const toggleCheck = (item, checked) => {
+  const id = item.id
+  if (checked) {
+    if (!checkedIds.value.includes(id)) checkedIds.value = [...checkedIds.value, id]
+    return
+  }
+  checkedIds.value = checkedIds.value.filter((value) => value !== id)
 }
 
 const handleCheckout = () => {
@@ -96,29 +106,17 @@ const handleRemove = async (itemId) => {
         <van-empty v-if="cartStore.items.length === 0" description="购物车空空如也"/>
 
         <div class="cart-list" v-else>
-          <!-- 使用 van-checkbox-group 包裹 -->
-          <van-checkbox-group v-model="checkedIds">
-            <div class="cart-item" v-for="item in cartStore.items" :key="item.id">
-              <!-- 勾选框 -->
-              <van-checkbox :name="item.id" shape="square" style="margin-right: 8px;"/>
-
-              <img :src="item.image_url || 'https://fastly.jsdelivr.net/npm/@vant/assets/cat.jpeg'" class="thumb"/>
-              <div class="info">
-                <div class="name">{{ item.name }}</div>
-                <div class="price">¥{{ item.price }}</div>
-              </div>
-              <div class="actions">
-                <van-icon name="delete-o" size="20" color="#969799" @click.stop="handleRemove(item.id)"/>
-                <!-- 绑定 Stepper 的修改事件 -->
-                <van-stepper
-                    v-model="item.quantity"
-                    min="1"
-                    integer
-                    @change="(val) => handleQuantityChange(item, val)"
-                />
-              </div>
-            </div>
-          </van-checkbox-group>
+          <!-- 勾选框和单行 UI 都收在 CartItem 里：购物车页、患者工作台用的是同一个组件 -->
+          <CartItem
+              v-for="item in cartStore.items"
+              :key="item.id"
+              :item="item"
+              selectable
+              :checked="checkedIds.includes(item.id)"
+              @update:checked="(value) => toggleCheck(item, value)"
+              @change="handleQuantityChange"
+              @remove="(row) => handleRemove(row.id)"
+          />
         </div>
 
         <div class="cart-footer" v-if="cartStore.items.length > 0">

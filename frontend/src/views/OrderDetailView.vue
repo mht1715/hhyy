@@ -6,6 +6,7 @@ import {useAuthStore} from '../store/auth'
 import {ArrowLeft, MapPin} from 'lucide-vue-next'
 import {showToast, showConfirmDialog} from 'vant'
 import OrderItem from '../components/order/OrderItem.vue'
+import {goBackOr} from '../utils/nav'
 
 const route = useRoute()
 const router = useRouter()
@@ -34,7 +35,7 @@ const loadDetail = async () => {
     order.value = await getOrderDetailApi(route.params.id)
   } catch (e) {
     showToast('订单加载失败')
-    router.back()
+    goBackOr(router, '/orders')
   } finally {
     loading.value = false
   }
@@ -78,7 +79,7 @@ onMounted(loadDetail)
 <template>
   <div class="detail-page">
     <div class="nav-bar">
-      <div class="back-btn" @click="router.back()">
+      <div class="back-btn" @click="goBackOr(router, '/orders')">
         <ArrowLeft :size="24"/>
       </div>
       <div class="title">订单详情</div>
@@ -124,7 +125,9 @@ onMounted(loadDetail)
       <div class="bottom-actions" v-if="['PAID', 'SHIPPED'].includes(order.status.toUpperCase())">
         <!-- 待发货状态 -->
         <template v-if="order.status.toUpperCase() === 'PAID'">
-          <van-button plain type="danger" round @click="handleCancel">取消订单</van-button>
+          <!-- 取消是「下单人」的动作：管理员从订单管理点进来只是查看/发货，
+               不能替患者取消（后端接口也只认本人） -->
+          <van-button v-if="!auth.isAdmin" plain type="danger" round @click="handleCancel">取消订单</van-button>
           <!-- 只有管理员能发货 -->
           <van-button v-if="auth.isAdmin" type="warning" round @click="handleMockShip">
             模拟商家发货

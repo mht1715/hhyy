@@ -9,10 +9,11 @@
  */
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {useRoute, useRouter} from 'vue-router'
-import {CheckCircle2, Clock, Headphones, RefreshCw, Send, ShieldAlert, ShieldCheck} from 'lucide-vue-next'
+import {CheckCircle2, ChevronRight, Clock, Headphones, RefreshCw, Send, ShieldAlert, ShieldCheck, Timer, Users} from 'lucide-vue-next'
 import dayjs from 'dayjs'
 import {showToast} from 'vant'
 import Navbar from '../components/Navbar.vue'
+import PageBar from '../components/common/PageBar.vue'
 import {
   acceptTicket,
   createWsTicket,
@@ -21,6 +22,7 @@ import {
   resolveTicket,
   sendAgentMessage
 } from '../api/support'
+import {fetchSupportStats} from '../api/workbench'
 import {useSupportSocket} from '../composables/useSupportSocket'
 
 const router = useRouter()
@@ -53,6 +55,11 @@ const tickets = ref([])
 const queueLoading = ref(false)
 const queueError = ref('')
 const now = ref(Date.now())
+
+// M5：工作台顶部要能一眼看到「今天接待了多少、平均等多久」。
+// 这个聚合接口独立于工单列表：工单列表只返回未结的，统计要的是 24h 窗口。
+const stats = ref(null)
+const statsLoading = ref(false)
 
 const selectedTicketId = ref('')
 const detail = ref(null)
@@ -467,15 +474,35 @@ const handleComposerKeydown = (event) => {
   handleSend()
 }
 
+const loadStats = async () => {
+  statsLoading.value = true
+  try {
+    stats.value = await fetchSupportStats()
+  } catch (e) {
+    // 统计是辅助信息：拿不到就不显示数字，不能因此让队列也进错误态
+    stats.value = null
+  } finally {
+    statsLoading.value = false
+  }
+}
+
+const formatSeconds = (value) => {
+  const total = Number(value || 0)
+  if (!total) return '—'
+  const minutes = Math.floor(total / 60)
+  const seconds = Math.round(total % 60)
+  return minutes ? `${minutes}m${seconds}s` : `${seconds}s`
+}
+
 const refreshQueue = async () => {
   forbidden.value = false
-  await loadTickets()
+  await Promise.allSettled([loadTickets(), loadStats()])
   startPolling()
 }
 
 onMounted(async () => {
   startClock()
-  await loadTickets()
+  await Promise.allSettled([loadTickets(), loadStats()])
   startPolling()
   // 刷新后回到刚才那条工单（?ticket=）
   const tid = route.query.ticket ? String(route.query.ticket) : ''
@@ -497,6 +524,17 @@ onBeforeUnmount(() => {
     <Navbar/>
 
     <main class="support-body">
+      <!-- 之前这个页面完全没有返回入口：不管从药品详情、Agent 广场还是工作台进来，
+           想回去只能按浏览器后退。PageBar 走 history.back()，
+           真的没有来源（直接打开链接）才落到首页。 -->
+      <PageBar
+          title="客服工作台"
+          subtitle="待接入队列 · 实时消息"
+          back-to="/"
+          back-label="返回"
+          sticky
+      />
+
       <section v-if="forbidden" class="forbidden-card">
         <ShieldAlert :size="30" color="#ef4444"/>
         <h2>仅客服与管理员可用</h2>
@@ -505,7 +543,44 @@ onBeforeUnmount(() => {
       </section>
 
       <template v-else>
-        <!-- 左：待接入队列 -->
+        <!-- M5：坐席的「今日战况」。数字来自 /api/support/stats（24h 窗口），
+             拿不到就整条隐藏，不占位也不影响队列。 -->
+        <div v-if="stats" class="support-stats">
+          <div class="stat-pill">
+            <Clock :size="13"/>
+            <div>
+              <b>{{ stats.queued }}</b>
+              <small>排队待接管</small>
+            </div>
+          </div>
+          <div class="stat-pill">
+            <Users :size="13"/>
+            <div>
+              <b>{{ stats.accepted }}</b>
+              <small>24h 已接管</small>
+            </div>
+          </div>
+          <div class="stat-pill">
+            <CheckCircle2 :size="13"/>
+            <div>
+              <b>{{ stats.resolved }}</b>
+              <small>24h 已结束</small>
+            </div>
+          </div>
+          <div class="stat-pill">
+            <Timer :size="13"/>
+            <div>
+              <b>{{ formatSeconds(stats.avg_wait_seconds) }}</b>
+              <small>平均等待</small>
+            </div>
+          </div>
+          <button type="button" class="stat-refresh" :disabled="statsLoading" @click="loadStats">
+            <RefreshCw :size="12" :class="{ spinning: statsLoading }"/>
+          </button>
+        </div>
+
+        <div class="support-cols">
+          <!-- 左：待接入队列 -->
         <aside class="queue-panel">
           <header class="panel-head">
             <div class="panel-title">
@@ -567,6 +642,8 @@ onBeforeUnmount(() => {
                 <div class="card-foot">
                   <span class="conversation-title">{{ ticket.conversation_title || '未命名会话' }}</span>
                   <span class="created-at">{{ formatTime(ticket.created_at) }}</span>
+                  <!-- 卡片整块可点，但只有 hover 不够明显，给一个常驻右箭头 -->
+                  <ChevronRight :size="13" class="card-arrow"/>
                 </div>
               </li>
             </ul>
@@ -712,6 +789,7 @@ onBeforeUnmount(() => {
             </div>
           </template>
         </section>
+        </div>
       </template>
     </main>
   </div>
@@ -729,6 +807,74 @@ onBeforeUnmount(() => {
     height: calc(100vh - 64px);
     margin: 0 auto;
     padding: 12px 16px 16px;
+    display: flex;
+    /* M5：顶部多了一条统计栏，所以整体改成「竖向：统计 + 双栏」 */
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+  }
+
+  .support-stats {
+    flex-shrink: 0;
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+
+    .stat-pill {
+      flex: 1 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 128px;
+      padding: 8px 12px;
+      background: #fff;
+      border: 1px solid #f3f4f6;
+      border-radius: 10px;
+      color: #b91c1c;
+
+      div {
+        display: flex;
+        flex-direction: column;
+        line-height: 1.2;
+      }
+
+      b {
+        font-size: 15px;
+        color: #111827;
+      }
+
+      small {
+        font-size: 10.5px;
+        color: #9ca3af;
+        white-space: nowrap;
+      }
+    }
+
+    .stat-refresh {
+      flex-shrink: 0;
+      display: grid;
+      place-items: center;
+      width: 32px;
+      border: 1px solid #f3f4f6;
+      border-radius: 10px;
+      background: #fff;
+      color: #6b7280;
+      cursor: pointer;
+
+      .spinning {
+        animation: support-spin 0.9s linear infinite;
+      }
+    }
+  }
+
+  .support-cols {
+    flex: 1;
     display: flex;
     gap: 12px;
     min-height: 0;
@@ -967,6 +1113,18 @@ onBeforeUnmount(() => {
       .created-at {
         flex-shrink: 0;
       }
+
+      /* 右箭头是「这张卡能点开」的常驻信号，不依赖 hover（手机没有 hover） */
+      .card-arrow {
+        flex-shrink: 0;
+        color: #d1d5db;
+        transition: color 0.16s, transform 0.16s;
+      }
+    }
+
+    &:hover .card-foot .card-arrow {
+      color: #dc2626;
+      transform: translateX(2px);
     }
   }
 
@@ -1329,15 +1487,27 @@ onBeforeUnmount(() => {
 
   @media (max-width: 900px) {
     .support-body {
-      flex-direction: column;
       height: calc(100vh - 64px);
       padding: 8px;
       gap: 8px;
     }
 
+    /* 手机上队列和会话不再并排：队列压到上面，会话占满剩下的高度 */
+    .support-cols {
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .support-stats {
+      .stat-pill {
+        min-width: 110px;
+        padding: 6px 10px;
+      }
+    }
+
     .queue-panel {
       width: 100%;
-      max-height: 38vh;
+      max-height: 34vh;
       flex-shrink: 0;
     }
 
@@ -1349,6 +1519,12 @@ onBeforeUnmount(() => {
     .support-message {
       max-width: 94%;
     }
+  }
+}
+
+@keyframes support-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 </style>

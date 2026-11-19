@@ -4,6 +4,7 @@ import {showToast, showConfirmDialog} from 'vant'
 import {parseProductApi} from '../../api/agent'
 import {uploadImageApi} from '../../api/upload'
 import AgentInput from '../common/AgentInput.vue'
+import {normalizeImageUrl} from '../../utils/image'
 
 const props = defineProps({
   isOpen: {type: Boolean, default: false},
@@ -73,19 +74,39 @@ watch(form, (newVal) => {
 }, {deep: true})
 
 // 图片真实上传逻辑
+const ACCEPTED_IMAGE = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+const MAX_IMAGE_MB = 5
+
 const afterRead = async (file) => {
+  // 客户端先挡一次：类型 / 体积不对时不用等一个来回，提示也更具体
+  const raw = file && file.file ? file.file : null
+  if (raw && raw.type && !ACCEPTED_IMAGE.includes(raw.type)) {
+    file.status = 'failed'
+    file.message = '只支持 JPG / PNG / WebP / GIF'
+    showToast('只支持 JPG / PNG / WebP / GIF 图片')
+    return
+  }
+  if (raw && raw.size > MAX_IMAGE_MB * 1024 * 1024) {
+    file.status = 'failed'
+    file.message = `图片不能超过 ${MAX_IMAGE_MB}MB`
+    showToast(`图片不能超过 ${MAX_IMAGE_MB}MB`)
+    return
+  }
+
   file.status = 'uploading'
   file.message = '上传中...'
   try {
-    const res = await uploadImageApi(file.file)
+    const res = await uploadImageApi(raw || file.file)
     file.status = 'done'
     file.message = ''
-    form.value.image_url = res.url
+    // 后端返回的是站内绝对路径（/static/uploads/xxx.png），
+    // 历史数据的反斜杠路径也在这里统一纠正
+    form.value.image_url = normalizeImageUrl(res && res.url)
     showToast({type: 'success', message: '图片上传成功'})
   } catch (error) {
     file.status = 'failed'
     file.message = '上传失败'
-    showToast('图片上传失败')
+    showToast({type: 'fail', message: (error && error.message) || '图片上传失败'})
   }
 }
 
@@ -154,7 +175,10 @@ const submit = () => {
 
               <van-field name="uploader" label="商品主图">
                 <template #input>
-                  <van-uploader v-model="fileList" :max-count="1" :after-read="afterRead"/>
+                  <div class="uploader-box">
+                    <van-uploader v-model="fileList" :max-count="1" accept="image/*" :after-read="afterRead"/>
+                    <p class="upload-hint">支持 JPG / PNG / WebP / GIF，≤ {{ MAX_IMAGE_MB }}MB</p>
+                  </div>
                 </template>
               </van-field>
 
@@ -255,5 +279,17 @@ const submit = () => {
 :deep(.van-cell-group__title) {
   padding-left: 16px;
   font-weight: 600;
+}
+
+.uploader-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  .upload-hint {
+    margin: 0;
+    font-size: 11px;
+    color: #9ca3af;
+  }
 }
 </style>

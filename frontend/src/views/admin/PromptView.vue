@@ -1,4 +1,7 @@
 <script setup>
+// KeepAlive 依赖组件名（App.vue 的 CACHED 白名单按 name 匹配）
+defineOptions({name: 'PromptView'})
+
 /**
  * Prompt 版本管理（M4，路由 /admin/prompts，仅 admin）。
  *

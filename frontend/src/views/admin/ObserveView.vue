@@ -1,4 +1,7 @@
 <script setup>
+// KeepAlive 依赖组件名（App.vue 的 CACHED 白名单按 name 匹配）
+defineOptions({name: 'ObserveView'})
+
 /**
  * 观测与评估看板（M4，路由 /admin/observe，仅 admin）。
  *
@@ -429,9 +432,10 @@ onMounted(loadAll)
                 class="metric-card"
                 :class="{ 'is-bad': item.bad }"
             >
-              <div class="metric-title">{{ item.title }}</div>
+              <!-- title 挂全文：卡片里只显示两行，鼠标悬停仍能读到完整口径 -->
+              <div class="metric-title" :title="item.title">{{ item.title }}</div>
               <div class="metric-value" :class="{ 'is-bad': item.bad }">{{ item.value }}</div>
-              <div class="metric-hint">{{ item.hint }}</div>
+              <div class="metric-hint" :title="item.hint">{{ item.hint }}</div>
             </div>
           </div>
 
@@ -465,7 +469,7 @@ onMounted(loadAll)
 
             <div v-else class="bar-list">
               <div v-for="bar in guardrailBars" :key="bar.flag" class="bar-row">
-                <span class="bar-label">{{ bar.label }}</span>
+                <span class="bar-label" :title="bar.label">{{ bar.label }}</span>
                 <div class="bar-track">
                   <div class="bar-fill" :style="{ width: `${bar.width}%` }"></div>
                 </div>
@@ -479,8 +483,8 @@ onMounted(loadAll)
               <ul>
                 <li v-for="(item, index) in guardrailRecent" :key="index">
                   <span class="flag-time">{{ formatTime(item.at) }}</span>
-                  <span class="flag-name">{{ flagLabel(item.flag) }}</span>
-                  <code v-if="item.agent_code" class="agent-code">{{ item.agent_code }}</code>
+                  <span class="flag-name" :title="flagLabel(item.flag)">{{ flagLabel(item.flag) }}</span>
+                  <code v-if="item.agent_code" class="agent-code" :title="item.agent_code">{{ item.agent_code }}</code>
                 </li>
               </ul>
             </div>
@@ -540,11 +544,17 @@ onMounted(loadAll)
                   :key="rowKey(item, index)"
                   class="recent-row"
                   :class="{ expanded: isExpanded(item, index) }"
+                  role="button"
+                  tabindex="0"
+                  :aria-expanded="isExpanded(item, index)"
                   @click="toggleRow(item, index)"
+                  @keydown.enter.prevent="toggleRow(item, index)"
+                  @keydown.space.prevent="toggleRow(item, index)"
               >
                 <div class="row-head">
-                  <span class="row-question">{{ item.question || '（无问题文本）' }}</span>
+                  <span class="row-question" :title="item.question || '（无问题文本）'">{{ item.question || '（无问题文本）' }}</span>
                   <span class="row-time">{{ formatTime(item.created_at) }}</span>
+                  <!-- 展开/收起用 ChevronDown + 翻转，比右箭头更准确表达「同一行内展开」 -->
                   <ChevronDown :size="14" class="row-arrow"/>
                 </div>
 
@@ -553,7 +563,7 @@ onMounted(loadAll)
                 </div>
 
                 <div class="row-meta">
-                  <code v-if="item.agent_code" class="agent-code">{{ item.agent_code }}</code>
+                  <code v-if="item.agent_code" class="agent-code" :title="item.agent_code">{{ item.agent_code }}</code>
                   <span class="meta-item">
                     耗时 {{ secondsText(item.latency_ms) }}
                   </span>
@@ -572,7 +582,7 @@ onMounted(loadAll)
                     {{ flagLabel(flag) }}
                   </span>
 
-                  <span v-if="item.feedback && item.feedback.rating" class="tag feedback-chip">
+                  <span v-if="item.feedback && item.feedback.rating" class="tag feedback-chip" :title="item.feedback.reason || ''">
                     <ThumbsUp v-if="item.feedback.rating === 'up'" :size="11"/>
                     <ThumbsDown v-else :size="11"/>
                     {{ item.feedback.rating === 'up' ? '有用' : '没用' }}
@@ -744,12 +754,15 @@ onMounted(loadAll)
 
   .metric-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    /* minmax(0, 1fr) 而不是 1fr：1fr 的最小尺寸是 auto，长文本会把列撑宽导致整页横向滚动 */
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 14px;
     margin-bottom: 16px;
   }
 
   .metric-card {
+    /* 卡片是 grid/flex 子项，默认 min-width:auto 会被长内容撑破，必须显式归零 */
+    min-width: 0;
     background: #fff;
     border-radius: 12px;
     padding: 16px 18px;
@@ -773,6 +786,8 @@ onMounted(loadAll)
       line-height: 1.2;
       color: #111827;
       font-variant-numeric: tabular-nums;
+      /* 极端长数字/百分号也不许顶出卡片 */
+      overflow-wrap: anywhere;
 
       &.is-bad {
         color: #dc2626;
@@ -783,6 +798,19 @@ onMounted(loadAll)
       font-size: 11.5px;
       line-height: 1.5;
       color: #9ca3af;
+    }
+
+    /* 标题与口径说明可能很长（例如带采样数、目标值），统一任意位置断词 + 最多两行，
+       完整文案由模板上的 title 提供，不靠撑宽卡片来「显示全」 */
+    .metric-title,
+    .metric-hint {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
     }
   }
 
@@ -800,6 +828,7 @@ onMounted(loadAll)
       flex-wrap: wrap;
       gap: 6px;
       margin-bottom: 14px;
+      min-width: 0;
 
       h3 {
         font-size: 16px;
@@ -808,8 +837,11 @@ onMounted(loadAll)
     }
 
     .muted {
+      min-width: 0;
       font-size: 12px;
       color: #9ca3af;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
 
     .panel-empty {
@@ -845,10 +877,11 @@ onMounted(loadAll)
 
   .cost-grid {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 12px;
 
     .cost-item {
+      min-width: 0;
       padding: 10px 12px;
       border-radius: 10px;
       background: #f9fafb;
@@ -857,6 +890,8 @@ onMounted(loadAll)
     .cost-label {
       font-size: 12px;
       color: #9ca3af;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
 
     .cost-value {
@@ -865,6 +900,7 @@ onMounted(loadAll)
       font-weight: 600;
       color: #111827;
       font-variant-numeric: tabular-nums;
+      overflow-wrap: anywhere;
     }
   }
 
@@ -881,13 +917,24 @@ onMounted(loadAll)
     }
 
     .bar-label {
-      flex-shrink: 0;
+      flex: 0 0 96px;
       width: 96px;
+      min-width: 0;
       color: #4b5563;
+      /* flag 名可能很长（例如 medical_disclaimer），固定宽度下必须断词 + 限两行，
+         否则要么被裁掉要么把条形图挤没 */
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
     }
 
     .bar-track {
       flex: 1;
+      /* 轨道允许被压缩，但留 24px 下限，窄屏也能看出长度差异 */
+      min-width: 24px;
       height: 8px;
       border-radius: 999px;
       background: #f3f4f6;
@@ -942,6 +989,7 @@ onMounted(loadAll)
       display: flex;
       align-items: center;
       gap: 8px;
+      min-width: 0;
       font-size: 12px;
       color: #4b5563;
     }
@@ -954,11 +1002,21 @@ onMounted(loadAll)
     }
 
     .flag-name {
-      min-width: 80px;
+      flex: 1;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      /* 中文标签一般一行足够，长英文 flag 限两行，悬停 title 看全文 */
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
     }
   }
 
   .agent-code {
+    max-width: 100%;
+    min-width: 0;
     padding: 0 6px;
     border-radius: 4px;
     background: #f3f4f6;
@@ -966,14 +1024,37 @@ onMounted(loadAll)
     font-size: 11px;
     line-height: 18px;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    /* code 是一整串无空格标识符：必须允许任意位置断行，而不是 nowrap 撑出容器 */
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .eval-table-wrap {
+    /* 窄屏表格横向滚动，而不是把列压到文字竖排 */
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    /* 细滚动条：横向滚动条不抢内容高度 */
+    scrollbar-width: thin;
+    scrollbar-color: #d1d5db transparent;
+
+    &::-webkit-scrollbar {
+      height: 6px;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      border-radius: 999px;
+      background: #d1d5db;
+    }
+
+    &::-webkit-scrollbar-track {
+      background: transparent;
+    }
   }
 
   .eval-table {
     width: 100%;
+    min-width: 300px;
     max-width: 520px;
     border-collapse: collapse;
 
@@ -984,6 +1065,8 @@ onMounted(loadAll)
       border-bottom: 1px solid #f3f4f6;
       font-size: 13px;
       color: #374151;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
 
     th {
@@ -997,6 +1080,32 @@ onMounted(loadAll)
       width: 120px;
       font-variant-numeric: tabular-nums;
       color: #111827;
+    }
+  }
+
+  /* 内部滚动列表：内容超过约 8 行就自己滚，页面高度不再被 20 条最近记录/全部 flag 拉长。
+     overscroll-behavior: contain 保证滚到底时不会把整页一起带着滚。 */
+  .bar-list,
+  .recent-flags ul,
+  .recent-list {
+    max-height: 320px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 4px;
+    scrollbar-width: thin;
+    scrollbar-color: #d1d5db transparent;
+
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      border-radius: 999px;
+      background: #d1d5db;
+    }
+
+    &::-webkit-scrollbar-track {
+      background: transparent;
     }
   }
 
@@ -1022,6 +1131,13 @@ onMounted(loadAll)
       background: #fff7f7;
     }
 
+    /* 键盘 Tab 过来要有可见焦点：role=button 的行不能只靠 hover 区分 */
+    &:focus-visible {
+      outline: 2px solid #fca5a5;
+      outline-offset: 1px;
+      border-color: #fca5a5;
+    }
+
     &.expanded {
       border-color: #fecaca;
       background: #fff;
@@ -1040,7 +1156,13 @@ onMounted(loadAll)
       font-weight: 600;
       line-height: 1.6;
       color: #111827;
+      overflow-wrap: anywhere;
       word-break: break-word;
+      /* 问题一行最多两行，避免一条超长提问把整行顶开；全文在 title 里 */
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
     }
 
     .row-time {
@@ -1070,10 +1192,13 @@ onMounted(loadAll)
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
       overflow: hidden;
+      overflow-wrap: anywhere;
+      word-break: break-word;
 
       &.is-full {
         display: block;
         white-space: pre-wrap;
+        overflow-wrap: anywhere;
         word-break: break-word;
         color: #374151;
       }
@@ -1102,11 +1227,15 @@ onMounted(loadAll)
     display: inline-flex;
     align-items: center;
     gap: 3px;
+    max-width: 100%;
     padding: 0 6px;
     border-radius: 6px;
     font-size: 10.5px;
     line-height: 17px;
-    white-space: nowrap;
+    /* 反馈原因等标签可能很长：允许折行而不是 nowrap 顶出卡片 */
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 
     &.is-flag {
       background: #f3f4f6;
@@ -1160,22 +1289,47 @@ onMounted(loadAll)
   @media (max-width: 1000px) {
     .metric-grid,
     .skeleton-grid {
-      grid-template-columns: repeat(2, 1fr);
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .cost-grid {
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(3, minmax(0, 1fr));
     }
   }
 
   @media (max-width: 768px) {
     .page-container {
       padding: 12px;
+      /* 兜底：万一有漏网的长内容，也不让整页能左右拖动。
+         用 clip 而不是 hidden，避免多造一层纵向滚动容器 */
+      overflow-x: clip;
     }
 
     .page-header {
       h2 {
         font-size: 19px;
+      }
+
+      .title-block p {
+        font-size: 12px;
+      }
+
+      /* 窄屏把时间窗 + 刷新/外链整体换行，按钮自身不缩、不溢出 */
+      .head-controls {
+        width: 100%;
+        gap: 6px;
+      }
+
+      .window-switch {
+        flex-wrap: wrap;
+      }
+
+      .window-btn {
+        padding: 5px 8px;
+      }
+
+      .ghost-btn {
+        height: 30px;
       }
     }
 
@@ -1194,16 +1348,41 @@ onMounted(loadAll)
       .metric-value {
         font-size: 21px;
       }
+
+      /* 手机上信息密度高，口径说明只留一行，避免指标卡又高又挤 */
+      .metric-hint {
+        -webkit-line-clamp: 1;
+      }
     }
 
     .cost-grid {
-      grid-template-columns: repeat(2, 1fr);
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .bar-list {
-      .bar-label {
-        width: 72px;
+      .bar-row {
+        gap: 8px;
+        align-items: flex-start;
       }
+
+      .bar-label {
+        flex-basis: 68px;
+        width: 68px;
+      }
+
+      .bar-count {
+        width: 46px;
+      }
+
+      .bar-share {
+        width: 34px;
+      }
+    }
+
+    /* 窄屏一行放不下「时间 + flag 名 + agent code」时，让 code 换行到第二行 */
+    .recent-flags li {
+      flex-wrap: wrap;
+      row-gap: 2px;
     }
   }
 }

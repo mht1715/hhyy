@@ -1,4 +1,7 @@
 <script setup>
+// KeepAlive 依赖组件名（App.vue 的 CACHED 白名单按 name 匹配）
+defineOptions({name: 'MemoryView'})
+
 /**
  * 我的记忆（契约 §3 / §7.2，路由 /me/memory，需登录）。
  *
@@ -7,11 +10,12 @@
  */
 import {computed, onMounted, ref} from 'vue'
 import {useRouter} from 'vue-router'
-import {Brain, RefreshCw, ShieldOff, Trash2} from 'lucide-vue-next'
+import {Brain, ArrowLeft, RefreshCw, ShieldOff, Trash2} from 'lucide-vue-next'
 import dayjs from 'dayjs'
 import {showConfirmDialog, showToast} from 'vant'
 import Navbar from '../components/Navbar.vue'
 import {clearMemory, deleteMemory, fetchMemory, setMemoryEnabled} from '../api/memory'
+import {goBackOr} from '../utils/nav'
 
 const router = useRouter()
 
@@ -204,6 +208,10 @@ onMounted(load)
       <header class="page-head">
         <div class="head-text">
           <div class="head-title">
+            <!-- 之前这页只能靠浏览器后退回工作台 -->
+            <button type="button" class="back-btn" aria-label="返回上一页" @click="goBackOr(router, '/patient')">
+              <ArrowLeft :size="18"/>
+            </button>
             <span class="head-icon">
               <Brain :size="17" color="#fff"/>
             </span>
@@ -351,6 +359,24 @@ onMounted(load)
       display: flex;
       align-items: center;
       gap: 8px;
+
+      .back-btn {
+        display: grid;
+        place-items: center;
+        width: 30px;
+        height: 30px;
+        padding: 0;
+        border: 1px solid #e5e7eb;
+        border-radius: 50%;
+        background: #fff;
+        color: #4b5563;
+        cursor: pointer;
+
+        &:hover {
+          border-color: #fecaca;
+          color: #dc2626;
+        }
+      }
 
       h1 {
         font-size: 17px;
