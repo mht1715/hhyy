@@ -25,6 +25,8 @@
 | **多 Agent 与 `@` 协作** | ✅ | M2：Agent 配置化注册 / `@` 并行 / SSE 流式 / 引用与免责声明 / 幂等与限流 |
 | **记忆系统 + 转人工** | ✅ | M3：checkpointer 短期记忆 / 语义记忆 / 敏感场景秒级建单 / WS 坐席端 / AI 静默 |
 | **评估、治理与演示** | ✅ | M4：golden set 50 条（recall@5 0.94 / 拒答 0.94）/ 合规词表与流式改写 / Prompt 版本与灰度 / 指标看板 / 👍👎 反馈闭环 |
+| **角色工作台与导览** | ✅ | M5：四角色工作台全部接真实数据 / 4 个聚合接口 / MvpBanner + 导览抽屉（8 步路线）/ 游客落地页重写 |
+| **商城链路与体验补全** | ✅ | M5：药品瀑布流 `/drugs` + 购物车 `/cart` + 公开目录接口 / 统一复用 `ProductCard`·`CartItem`·`OrderCard` / 管理员订单管理（含模拟发货）/ 图片上传修复 / `goBackOr` 统一返回 / Agent 广场快捷提问 |
 
 ---
 
@@ -500,6 +502,136 @@ $env:CHAT_RATE_LIMIT_PER_MINUTE="999"   # 默认 20 次/分钟/人，压测前�
 
 ---
 
+## 角色工作台与导览（M5）
+
+M4 结束时，登录后的落地页是假的：`/admin` 写死「1,284 用户 / 56 订单」，`/doctor`、`/patient`
+是 15 行占位。真实能力都藏在二级页面里，等于要面试官自己找入口。M5 把这件事翻过来：
+**登录后第一屏就是真实数据 + 可点操作**。
+
+### 四个工作台各自回答什么问题
+
+| 角色 | 路由 | 首屏回答的问题 | Tab |
+| --- | --- | --- | --- |
+| 患者 | `/patient` | 我的咨询/订单/记忆现在什么状态 | 概览 · 问诊 · 订单 · 购物车 · 我的（会话 + 记忆） |
+| 医生 | `/doctor` | 药品资料齐不齐、AI 咨询都问了什么 | 概览 · 药品库（真实 CRUD） · AI 用药咨询 |
+| 客服 | `/support` | 现在有多少人排队、今天接待了多少 | 队列 + 会话双栏（24h 统计条） |
+| 管理员 | `/admin` | 系统健康吗、今天该处理什么 | 总览 · 订单 · 质量 · 系统 |
+
+Tab 与 URL 同步（`?tab=orders`），刷新/分享回到同一屏；桌面是顶部药丸，手机是底部 Tab。
+
+### 四个聚合接口
+
+| 接口 | 权限 | 返回什么 | 为什么聚合 |
+| --- | --- | --- | --- |
+| `GET /api/me/workbench` | 登录即可 | 按角色返回计数 + 最近会话/订单 + 工单状态 + 记忆摘要 | 首屏要 5 类数据，串行 5 次往返太慢；「只能查自己」的判断也不该散在 5 处 |
+| `GET /api/public/stats` | 游客 | 知识库文档/切片、Agent 数、最近评估指标 | 落地页数字必须真实，否则一问「这 10 万用户哪来的」就露 |
+| `GET /api/support/stats` | support/admin | 24h 接管/结束数、排队数、平均等待 | 工单列表只返回未结单，统计口径不同 |
+| `GET /api/admin/observe/system` | admin | 5 个依赖状态 + 14 项运行时配置 | 解释「为什么这台机器召回 0.94」：模型、维度、阈值都摊开 |
+
+`/api/admin/observe/overview` 同时补了 `trend[]`（逐日轮次/拒答/会话/工单）与 `todos[]`
+（排队工单、差评、治理拦截、失败文档、评估失败用例），工作台首屏直接用。
+
+### 商城链路：药品广场 → 详情 → 购物车 → 订单
+
+之前药品列表在 `/products`，是后台管理页（增删改，只给 admin/doctor），患者和游客根本进不去。
+现在把「逛」和「管」分开：
+
+| 页面 | 路由 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| 药品广场 | `/drugs` | 游客可看 | CSS `columns` 真瀑布流（桌面 4 列 / 手机 2 列）、搜索防抖 300ms、分类筛选、加购（未登录弹登录框） |
+| 药品详情 | `/product/:id` | 游客可看 | 规格/说明书/加购，右侧 AI 药师；顶部给「药品广场」出口（直接打开链接时 `back()` 会出站） |
+| 购物车 | `/cart` | 登录 | 数量防抖、二次确认删除/清空、内置滚动列表 + 吸底结算条 |
+| 订单 | `/orders` | 登录 | 状态筛选、取消、确认收货；患者工作台里也有一份（同一个 `OrderCard`） |
+| 订单管理 | `/admin?tab=orders` | 管理员 | 全部订单、按状态筛选、下单人、**模拟发货**（只对「待发货」可点）、进详情 |
+
+新增公开只读接口 `GET /api/catalog/products?keyword=&category=` 与 `GET /api/catalog/categories`：
+只返回展示字段（价格/规格/图片/分类/是否在售），不暴露后台数据，也不要求登录。
+
+### 组件复用与返回导航（第二轮修复）
+
+这一轮把「同一个东西写两遍」的问题收掉了，顺手修了三个只在真用时才暴露的 bug。
+
+**组件收敛**（之前确实是复制粘贴出来的第二套 UI）：
+
+| 组件 | 替换掉了 | 用在哪 |
+| --- | --- | --- |
+| `product/ProductCard.vue`（`variant=shop|manage`） | 删除 `product/DrugCard.vue` | 药品广场 / 后台药品库 |
+| `cart/CartItem.vue` | `CartFloating`、`CartView`、患者工作台里三份购物车行 | 三处共用：勾选、点图进详情、步进器、小计、删除 |
+| `order/OrderCard.vue`（`mode=patient|admin`） | `OrderView`、患者工作台、管理员订单三份订单卡 | 状态标签、明细、合计、操作按钮 |
+| `order/OrderItem.vue` | — | 明细行统一：缩略图 + 名称可点进药品详情 |
+
+**三个真 bug**：
+
+1. **上传药品图片必失败**：`upload.py` 声明 `response_model=UploadResponse`，却返回 `ResponseModel` 外壳，
+   FastAPI 响应校验失败 → 500（文件其实已落盘）。同时 `os.path.join` 在 Windows 上拼出
+   `/static/uploads\xxx.png`，服务端匹配不到 → 即使上传成功图也裂。现在返回 `{url: "/static/uploads/<uuid>.png"}`，
+   目录按代码位置定位，前端再加 `utils/image.js` 做反斜杠纠正 + 空值/裂图内联占位。
+2. **图片「展示不出来」还有一层**：种子数据里 4 条商品的 `image_url` 指向 `hhyy.com` 外链，
+   被防盗链时就是裂图；这类请求前端不再重试，直接落占位图。
+3. **返回按钮乱跳**：`AgentChatView` 写死回「Agent 广场」，`SupportView` 压根没有返回，
+   `OrderView`/`OrderDetail`/`Checkout`/`ProductView` 用的是裸 `router.back()`（直接打开链接会把人送出站外）。
+   现在统一 `utils/nav.goBackOr(router, fallback)`：有历史就 `back()`，没有才落到兜底页；
+   客服台、药品广场、购物车用 `common/PageBar.vue`。
+
+**体验补全**：
+
+- **Agent 广场预留快捷输入**：顶部「一句话开始」（输入框 + 选 Agent + 去提问）、6 个场景入口
+  （药品咨询 / 订单售后 / 企业介绍 / **药品录入助手** / 客服工作台 / 检索测试台，带锁标提示身份不足）、
+  每张 Agent 卡片下方 2 条示例提问，点了直接进对话并预填 `?q=`；
+- **下完单回工作台数字不刷新**：患者工作台被 `KeepAlive` 缓存，`onMounted` 只跑一次。现在 `onActivated`
+  每次激活都静默对齐「聚合概览 + 当前 Tab 列表」；结算成功也直接回 `/patient?tab=orders`（原来跳独立的 `/orders`）；
+- **患者工作台订单/购物车 Tab 也换成共享组件**：订单卡带缩略图、可点进药品详情，购物车行有图、有步进器、能进详情。
+
+### 状态保持、滚动与「返回顶部」
+
+- `App.vue` 用 `KeepAlive` 缓存列表型页面（工作台、药品广场、购物车、订单、记忆、会话、广场），
+  从详情页返回后筛选条件、已加载列表都还在（白名单在 `App.vue` 的 `CACHED`）。
+- 路由 `scrollBehavior` + 一个有界 Map 记录离开时的 `scrollY`，返回时还原——
+  只靠 `savedPosition` 在 KeepAlive 下恢复不了。
+- 全局 `BackTop`：滚过 480px 出现，带进度环；手机上让开底部 Tab 与导览浮标。
+- 长列表（订单/会话/记忆/拦截记录/最近对话）都放进自己的滚动区（`max-height` + 细滚动条），
+  不让整页被拉成一条。
+- 底部 Tab 控制在 5 个以内：患者原来是 6 个，把「我的会话」和「记忆」合并成「我的」。
+
+
+### 提示与导览：给面试官的四个层次
+
+1. **MvpBanner**（落地页 + 每个工作台顶部）：一句话说清「演示版、重点是 Agent 与 RAG、
+   支付物流处方是模拟」，可关闭并记住。
+2. **顶栏 `MVP 演示` 徽标**：任何页面都能点开导览。
+3. **导览抽屉**（右下角浮标，对话页自动隐藏以免挡输入框）：五个页签——
+   项目介绍 / 能力边界 / 设计思考 / 后续拓展 / 动手走一遍。
+   最后一个是 8 步路线，点一步直接跳过去，进度存 localStorage。
+4. **FeatureHint**（面板级）：说明「这块在展示什么能力」，标签可点开对应设计思考。
+
+内容都在 [`frontend/src/data/guide.js`](frontend/src/data/guide.js)，改话术不用碰模板。
+
+### 游客落地页
+
+`/` 从「你好，游客」改成三段：真实数字（文档 13 / 切片 86 / Agent 4 / 召回率）→
+能力地图（4 张卡各通一个真实功能）→ 按角色一键登录（密码统一 `123456`，直接进工作台）。
+统计接口挂了只显示「—」，不会白屏。
+
+### 实测（2026-11-19，本机）
+
+| 接口 | 结果 |
+| --- | --- |
+| `/api/public/stats` | `documents=13, chunks=86, agents=4, eval.recall_at_5=0.75`（最近一次 4 条小样本） |
+| `/api/me/workbench`（patient） | `conversations=42, memories=13, open_tickets=0` |
+| `/api/me/workbench`（support） | `queued=0, assigned=0, resolved=2` |
+| `/api/support/stats` | `accepted=2, resolved=2, avg_wait_seconds=20` |
+| `/api/admin/observe/overview` | `trend` 7 天、`todos` 5 项（差评 1 / 治理 6 / 评估失败 1） |
+| `/api/admin/observe/system` | 5 组件全 `ok`，配置 14 项 |
+| `/api/catalog/products` | 6 条在售药品；`keyword=花红` 命中 3 条；`category=妇科用药` 命中 2 条 |
+| `POST /api/upload/` | 200，返回 `/static/uploads/<uuid>.png`；再 `GET` 该地址 200、PNG 头正确（修复前 500） |
+| `GET /api/orders/admin/all` | 200，5 单（paid 2 / shipped 1 / completed 1 / cancelled 1），`pending_ship=2` |
+| `PUT /api/orders/{id}/ship` | 首次 200 → `shipped`；再发同一条 400「只有『待发货』订单可以发货」 |
+| `GET /api/orders/{id}`（admin 看别人的单） | 200（修复前 404） |
+
+前端 `npm run build` 通过（103→121 precache 条目），后端 `ruff` 全绿，`pytest` 194 passed / 2 skipped。
+
+---
+
 ## 测试
 
 ```powershell
@@ -517,7 +649,7 @@ $env:CHAT_RATE_LIMIT_PER_MINUTE="999"   # 默认 20 次/分钟/人，压测前�
 backend/
 ├── app/
 │   ├── agent/          # 编排 + checkpointer（M2/M3）
-│   ├── api/            # 路由（chat / memory / handoff / support / ws）
+│   ├── api/            # 路由（chat / memory / handoff / support / ws / workbench）
 │   ├── core/           # 配置 / 数据库 / 安全 / 时间格式
 │   ├── guardrail/      # 输出治理（M4）
 │   ├── llm/            # 模型工厂 + 契约
@@ -532,8 +664,12 @@ backend/
 ├── alembic/            # 数据库迁移（alembic.ini 必须纯 ASCII）
 ├── serve.py            # 启动入口：Windows 上先设 SelectorEventLoop（checkpointer 依赖）
 └── tests/              # unit / integration / eval
-frontend/src/           # Vue3 + Vant
-docs/                   # 需求文档、任务清单
+frontend/src/
+├── components/workbench/  # 工作台骨架：Shell / TabBar / PanelCard / StatCard / FeatureHint / MvpBanner（M5）
+├── components/guide/      # 导览抽屉（M5）
+├── data/guide.js          # 导览内容：介绍 / 边界 / 思考 / 拓展 / 8 步路线（改话术只改这里）
+└── views/                 # 四角色工作台 + Agent 广场 + 后台子页
+docs/                   # 需求文档、任务清单、回归清单、演示脚本
 script/                 # dev.ps1、种子数据、自检脚本
 ```
 
