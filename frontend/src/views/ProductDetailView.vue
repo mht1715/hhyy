@@ -10,6 +10,7 @@ import DrugAIAssistant from '../components/product/DrugAIAssistant.vue'
 import {useAuthStore} from '../store/auth'
 import {imageUrl} from '../utils/image'
 import {goBackOr} from '../utils/nav'
+import {writeDirectItem} from '../utils/checkout'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -60,18 +61,15 @@ const buyNow = () => {
     return showToast('请先登录后再购买')
   }
 
-  // 将商品信息存入 sessionStorage，并打上 direct_buy 标记
-  const directItem = {
+  // 「立即购买」清单交给结算页（utils/checkout 会顺手清掉购物车结算的残留）
+  writeDirectItem({
     product_id: product.value.id,
     quantity: 1,
     name: product.value.name,
     price: product.value.price,
     image_url: product.value.image_url,
     spec: product.value.spec
-  }
-  sessionStorage.setItem('direct_buy_item', JSON.stringify(directItem))
-  // 清除之前可能残留的购物车结算标记
-  sessionStorage.removeItem('checkout_items')
+  })
 
   router.push('/checkout?mode=direct')
 }

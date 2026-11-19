@@ -42,6 +42,7 @@ import AgentChat from '../components/agent/AgentChat.vue'
 import OrderCard from '../components/order/OrderCard.vue'
 import CartItem from '../components/cart/CartItem.vue'
 import {fetchMyWorkbench} from '../api/workbench'
+import {writeCheckoutItems} from '../utils/checkout'
 import {cancelOrderApi, getMyOrdersApi, receiveOrderApi} from '../api/order'
 import {clearCartApi, getCartApi, removeCartItemApi, updateCartQuantityApi} from '../api/cart'
 import {clearMemory, deleteMemory, fetchMemory, setMemoryEnabled} from '../api/memory'
@@ -519,7 +520,16 @@ const clearCart = async () => {
   }
 }
 
-const goCheckout = () => router.push('/checkout')
+// 结算清单必须显式写进去：之前这里直接 push('/checkout')，
+// 结算页拿不到清单就永远显示「没有要结算的商品」
+const goCheckout = () => {
+  if (!cartRows.value.length) {
+    showToast('购物车是空的，先去逛逛')
+    return
+  }
+  writeCheckoutItems(cartRows.value)
+  router.push('/checkout')
+}
 
 /* ------------------------------------------------------------------ *
  * 会话 Tab
@@ -817,10 +827,12 @@ onActivated(async () => {
   await Promise.allSettled(tasks)
 })
 
-// Tab 切换：写 URL + 懒加载该 Tab 的数据
+// Tab 切换：写 URL + 懒加载该 Tab 的数据。
+// 购物车每次都重拉：它会被别的页面改（广场加购、下单成功清空），
+// 拿着上一次的旧行去结算，等于把已经买过的商品再下一单。
 watch(active, (key) => {
   writeTabToUrl(key)
-  activateTab(key)
+  activateTab(key, key === 'cart')
 })
 
 // 地址栏的 ?tab= 变了（例如点了指标卡），把页面切过去
@@ -1159,7 +1171,12 @@ watch(() => route.query.tab, () => {
         </template>
 
         <ul class="conv-list">
-          <li v-for="row in allConversations" :key="row.id" class="conv-item">
+          <li
+              v-for="row in allConversations"
+              :key="row.id"
+              class="conv-item is-clickable"
+              @click="goConversation(row)"
+          >
             <div class="conv-main">
               <div class="conv-top">
                 <span class="conv-title">{{ row.title || '未命名会话' }}</span>
@@ -1177,7 +1194,7 @@ watch(() => route.query.tab, () => {
               </div>
             </div>
 
-            <button type="button" class="btn" @click="goConversation(row)">
+            <button type="button" class="btn" @click.stop="goConversation(row)">
               继续对话<ArrowRight :size="13"/>
             </button>
           </li>
@@ -1888,6 +1905,20 @@ watch(() => route.query.tab, () => {
   min-width: 0;
   padding: 12px 0;
   border-bottom: 1px solid #f3f4f6;
+
+  /* 整行可点（点卡片正文也能进会话，不用非去戳右边那个按钮） */
+  &.is-clickable {
+    cursor: pointer;
+    transition: background-color 0.16s;
+
+    &:hover {
+      background: #fffbfb;
+
+      .conv-title {
+        color: #b91c1c;
+      }
+    }
+  }
 
   &:last-child {
     border-bottom: none;

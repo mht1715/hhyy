@@ -71,7 +71,10 @@ const open = () => emit('open', props.order)
 </script>
 
 <template>
-  <article class="order-card" :class="{ 'is-flat': flat }">
+  <!-- 整张卡可点进详情：之前只有右下角那个「详情」按钮可点，
+       用户点卡片正文毫无反应，看起来像「点了跳转不了」。
+       卡内的复制单号 / 明细行 / 操作按钮都各自 stop，不会连跳两次。 -->
+  <article class="order-card is-clickable" :class="{ 'is-flat': flat }" @click="open">
     <header class="card-head">
       <button type="button" class="order-no" title="点击复制完整订单号" @click.stop="copyId">
         <span>{{ shortOrderId(order.id) }}</span>
@@ -155,10 +158,28 @@ const open = () => emit('open', props.order)
   padding: 12px 14px;
   min-width: 0;
 
+  /* 整卡可点：给光标和 hover 反馈，不然「能点」这件事没人看得出来 */
+  &.is-clickable {
+    cursor: pointer;
+    transition: border-color 0.16s, box-shadow 0.16s;
+
+    &:hover {
+      border-color: #fecaca;
+      box-shadow: 0 6px 16px -12px rgba(239, 68, 68, 0.5);
+    }
+  }
+
   &.is-flat {
     border: none;
     border-radius: 0;
     padding: 0;
+
+    /* 嵌在面板里的卡片没有边框，hover 只给一点底色，别出现「凭空冒出的边框」 */
+    &.is-clickable:hover {
+      border-color: transparent;
+      box-shadow: none;
+      background: #fffbfb;
+    }
   }
 
   .card-head {

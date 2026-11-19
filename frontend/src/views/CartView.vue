@@ -22,6 +22,7 @@ import PageBar from '../components/common/PageBar.vue'
 import CartItem from '../components/cart/CartItem.vue'
 import {useAuthStore} from '../store/auth'
 import {useCartStore} from '../store/cart'
+import {writeCheckoutItems} from '../utils/checkout'
 
 // 与 App.vue 的 KeepAlive CACHED 列表保持一致，否则返回时会重新挂载、丢状态
 defineOptions({name: 'CartView'})
@@ -150,9 +151,8 @@ const handleClear = async () => {
 const handleCheckout = async () => {
   if (cart.items.length === 0) return
   await flushPendingSync() // 结算前把数量同步补齐
-  // 结算页靠 sessionStorage 里的商品 id 过滤购物车，不写进去进去就是空列表
-  sessionStorage.setItem('checkout_items', JSON.stringify(cart.items.map((item) => item.id)))
-  sessionStorage.removeItem('direct_buy_item') // 清掉「立即购买」可能残留的数据，避免串单
+  // 结算清单以快照形式交给结算页（utils/checkout 会顺手清掉「立即购买」的残留）
+  writeCheckoutItems(cart.items)
   router.push('/checkout')
 }
 

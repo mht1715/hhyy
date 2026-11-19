@@ -61,11 +61,12 @@ const roleNameMap = {admin: '管理员', doctor: '医生', patient: '患者', su
 
 <template>
   <header class="navbar">
-    <!-- 左侧 Logo 不变 -->
-    <div class="left-brand">
+    <!-- 左侧 Logo：任何角色、任何页面点了都回首页（之前是个纯装饰的 div，
+         面试官在工作台里想回首页只能猜顶栏那几个入口） -->
+    <RouterLink to="/" class="left-brand" aria-label="返回首页">
       <Hexagon color="#ef4444" :size="28" fill="#ef4444"/>
       <span class="brand-name">花红<span class="brand-sub">agent（demo）</span></span>
-    </div>
+    </RouterLink>
 
     <nav class="nav-links">
       <RouterLink v-if="auth.isLoggedIn && homePath !== '/'" :to="homePath" class="nav-link" :class="{ active: isWorkbenchActive }">
@@ -159,6 +160,23 @@ const roleNameMap = {admin: '管理员', doctor: '医生', patient: '患者', su
     align-items: center;
     gap: 12px;
     white-space: nowrap;
+    /* 包在 RouterLink 里：去掉链接下划线，保留原来的排版 */
+    color: inherit;
+    text-decoration: none;
+    cursor: pointer;
+    border-radius: 10px;
+    padding: 4px 6px;
+    margin-left: -6px;
+    transition: background-color 0.18s;
+
+    &:hover {
+      background: #f9fafb;
+    }
+
+    &:focus-visible {
+      outline: 2px solid #fca5a5;
+      outline-offset: 2px;
+    }
 
     .brand-name {
       font-size: 18px;

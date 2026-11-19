@@ -6,6 +6,7 @@ import {useAuthStore} from '../../store/auth'
 import {ShoppingCart, Trash2} from 'lucide-vue-next'
 import {showToast} from 'vant'
 import CartItem from './CartItem.vue'
+import {writeCheckoutItems} from '../../utils/checkout'
 
 const router = useRouter()
 const cartStore = useCartStore()
@@ -65,13 +66,16 @@ const toggleCheck = (item, checked) => {
 
 const handleCheckout = () => {
   if (checkedIds.value.length === 0) return showToast('请选择要结算的商品')
-  showCartPopup.value = false
   if (!auth.isLoggedIn) {
     auth.isLoginModalOpen = true
     return showToast('请先登录后再结算')
   }
-  // 把选中的商品 ID 存在 SessionStorage 里，传给结算页
-  sessionStorage.setItem('checkout_items', JSON.stringify(checkedIds.value))
+  // 把「勾选的那几件」整体交给结算页：只给 id 的话，结算页还得依赖 store 已经 fetch 完，
+  // 而且提交时是整车下单——勾了 2 件车里还有 3 件时会多买
+  const selected = cartStore.items.filter((item) => checkedIds.value.includes(item.id))
+  if (selected.length === 0) return showToast('选中的商品已不在购物车，请刷新后再试')
+  showCartPopup.value = false
+  writeCheckoutItems(selected)
   router.push('/checkout')
 }
 

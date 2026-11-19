@@ -32,8 +32,8 @@ const goToDetail = () => {
       role="link"
       tabindex="0"
       :aria-label="`查看 ${item.name || '药品'} 详情`"
-      @click="goToDetail"
-      @keydown.enter.prevent="goToDetail"
+      @click.stop="goToDetail"
+      @keydown.enter.stop.prevent="goToDetail"
   >
     <img class="thumb" :src="imageUrl(item.image_url)" :alt="item.name || '药品'" loading="lazy"
          @error="onImageError"/>

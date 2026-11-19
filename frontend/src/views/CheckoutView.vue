@@ -1,13 +1,29 @@
 <script setup>
-import {ref, computed, onMounted} from 'vue'
-import {useRouter, useRoute} from 'vue-router'
+/**
+ * 确认订单 / 模拟支付。
+ *
+ * 结算清单现在统一走 utils/checkout.js 的快照：
+ * 页面不再依赖「sessionStorage 里的 id + pinia 里已 fetch 的购物车」这两个东西同时成立，
+ * 所以刷新、从工作台进来、从浮层勾选进来，看到的都是同一份清单。
+ *
+ * 下单时把清单显式提交（items + from_cart），而不是让后端自己读整车：
+ * 浮层里勾了 2 件、车里还有 3 件时，只该结算并清掉那 2 件。
+ */
+import {computed, onMounted, ref} from 'vue'
+import {useRoute, useRouter} from 'vue-router'
 import {useCartStore} from '../store/cart'
 import {useAuthStore} from '../store/auth'
-import {showToast} from 'vant'
 import {ArrowLeft, MapPin} from 'lucide-vue-next'
-import {checkoutApi} from '../api/order' // 引入支付 API
+import {checkoutApi} from '../api/order'
 import {goBackOr} from '../utils/nav'
-import {resolveHomePath} from '../utils/permission'
+import {imageUrl, onImageError} from '../utils/image'
+import {
+  clearCheckout,
+  checkoutTotal,
+  readCheckoutItems,
+  readDirectItem,
+  toCheckoutItem
+} from '../utils/checkout'
 
 const router = useRouter()
 const route = useRoute()
@@ -18,25 +34,15 @@ const payStatus = ref('unpaid') // unpaid | paying | success
 const orderNo = ref('')
 const paidAmount = ref(0)
 
-// 判断是否为立即购买模式
-const isDirectBuy = route.query.mode === 'direct'
+// 结算清单（快照）+ 加载态：之前没有加载态，购物车还没回来就渲染「没有要结算的商品」
+const selection = ref([])
+const loading = ref(true)
+const loadError = ref('')
 
-// 计算当前要结算的商品列表
-const checkoutItems = computed(() => {
-  if (isDirectBuy) {
-    const directItem = JSON.parse(sessionStorage.getItem('direct_buy_item') || 'null')
-    return directItem ? [directItem] : []
-  } else {
-    // 购物车模式，只展示勾选的
-    const ids = JSON.parse(sessionStorage.getItem('checkout_items') || '[]')
-    return cartStore.items.filter(item => ids.includes(item.id))
-  }
-})
-
-// 计算总价
-const totalPrice = computed(() => {
-  return checkoutItems.value.reduce((sum, item) => sum + item.price * item.quantity, 0)
-})
+const isDirectBuy = computed(() => route.query.mode === 'direct')
+const checkoutItems = computed(() => selection.value)
+const totalPrice = computed(() => checkoutTotal(selection.value))
+const totalCount = computed(() => selection.value.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0))
 
 const address = {
   name: '张药师',
@@ -44,41 +50,42 @@ const address = {
   detail: '广西壮族自治区南宁市青秀区民族大道 123 号 花红药业大厦 8 楼'
 }
 
-// 真实发起支付
-const handlePay = async () => {
-  if (checkoutItems.value.length === 0) return
-  payStatus.value = 'paying'
+/**
+ * 清单与「最新购物车」对齐：清单里还留在车里的行，用车上最新的价格/数量，
+ * 避免展示的金额和实际下单金额不一致；已经不是同一条行的，按清单原样展示。
+ */
+const mergeWithCart = (snapshot, cartRows) => {
+  const byId = new Map(cartRows.filter((row) => row.id).map((row) => [row.id, row]))
+  const byProduct = new Map(cartRows.map((row) => [row.product_id, row]))
+  return snapshot.map((item) => byId.get(item.id) || byProduct.get(item.product_id) || item)
+}
 
+const loadSelection = async () => {
+  loading.value = true
+  loadError.value = ''
   try {
-    let payload = {}
-    if (isDirectBuy) {
-      // 立即购买传商品列表
-      payload.items = checkoutItems.value.map(i => ({product_id: i.product_id, quantity: i.quantity}))
+    if (isDirectBuy.value) {
+      const item = readDirectItem()
+      selection.value = item ? [item] : []
+      if (!item) loadError.value = '没有找到要购买的商品，可能已经支付过了'
+      return
     }
-    // 购物车模式不传 items，后端自动读购物车
 
-    const res = await checkoutApi(payload)
-
-    // 支付成功逻辑
-    paidAmount.value = totalPrice.value
-    orderNo.value = res.order_id
-    payStatus.value = 'success'
-
-    // 清理本地缓存和购物车状态
-    sessionStorage.removeItem('direct_buy_item')
-    sessionStorage.removeItem('checkout_items')
-    await cartStore.fetchCart() // 刷新购物车
-
-    // 延迟跳回「我的订单」：患者直接回工作台的订单 Tab，
-    // 工作台是 KeepAlive 缓存的，onActivated 里会重新拉一次统计与订单，
-    // 所以「下完单回来数字没变」的问题在这里和 PatientView 两边一起兜住
-    window.setTimeout(() => {
-      router.replace(afterPaidTarget.value)
-    }, 2200)
-
+    const snapshot = readCheckoutItems()
+    if (auth.isLoggedIn) {
+      try {
+        await cartStore.fetchCart()
+      } catch (e) {
+        // 拉不到购物车时，只要还有快照就能继续结算；两个都空才是真的没东西
+        if (snapshot.length === 0) throw e
+      }
+    }
+    const cartRows = cartStore.items.map(toCheckoutItem).filter(Boolean)
+    selection.value = snapshot.length ? mergeWithCart(snapshot, cartRows) : cartRows
   } catch (e) {
-    payStatus.value = 'unpaid'
-    // 接口异常在拦截器统一提示了，这里可以不写
+    loadError.value = (e && e.message) || '结算清单加载失败'
+  } finally {
+    loading.value = false
   }
 }
 
@@ -89,20 +96,50 @@ const afterPaidTarget = computed(() => (
         : {path: '/orders'}
 ))
 
-const goHome = () => router.push(resolveHomePath(auth.role))
+const handlePay = async () => {
+  if (checkoutItems.value.length === 0) return
+  payStatus.value = 'paying'
 
-onMounted(() => {
-  // 如果是购物车模式，刷新一下购物车数据防丢失
-  if (!isDirectBuy) {
+  try {
+    // 两种模式都显式传 items：金额与件数以服务端重新读到的价格/库存为准
+    const payload = {
+      items: checkoutItems.value.map((item) => ({
+        product_id: item.product_id,
+        quantity: Number(item.quantity) || 1
+      }))
+    }
+    // 购物车结算：让后端把结算过的行从购物车删掉（勾选结算是「真的只结算这些」）
+    if (!isDirectBuy.value) payload.from_cart = true
+
+    const res = await checkoutApi(payload)
+
+    paidAmount.value = totalPrice.value
+    orderNo.value = res.order_id
+    payStatus.value = 'success'
+
+    // 清单任务完成：两个 key 一起清，避免返回结算页把同一单再下一遍
+    clearCheckout()
+    // 不 await：刷新购物车不该拖住成功页的展示与跳转
     cartStore.fetchCart()
+
+    // 延迟跳回订单：患者回工作台订单 Tab，工作台是 KeepAlive 缓存的，
+    // onActivated 会重新拉统计与订单，所以「下完单回来数字没变」两边一起兜住
+    window.setTimeout(() => {
+      router.replace(afterPaidTarget.value)
+    }, 2200)
+  } catch (e) {
+    payStatus.value = 'unpaid'
+    // 接口异常在拦截器统一提示了，这里只把按钮解锁，别让人卡在「支付中」
   }
-})
+}
+
+onMounted(loadSelection)
 </script>
 
 <template>
   <div class="checkout-page">
     <div class="nav-bar">
-      <div class="back-btn" @click="goBackOr(router, '/cart')">
+      <div class="back-btn" @click="goBackOr(router, isDirectBuy ? '/drugs' : '/cart')">
         <ArrowLeft :size="24"/>
       </div>
       <div class="title">{{ payStatus === 'success' ? '支付结果' : '确认订单' }}</div>
@@ -126,8 +163,22 @@ onMounted(() => {
     <!-- 结算状态 -->
     <template v-else>
       <div class="content-wrapper">
-        <van-empty v-if="checkoutItems.length === 0" description="没有要结算的商品">
-          <van-button round type="danger" @click="router.push('/')">去逛逛</van-button>
+        <div v-if="loading" class="checkout-state">
+          <van-loading size="22px" vertical>正在准备结算清单…</van-loading>
+        </div>
+
+        <div v-else-if="loadError" class="checkout-state">
+          <van-empty image="error" :description="loadError">
+            <van-button round type="danger" @click="loadSelection">重新加载</van-button>
+          </van-empty>
+        </div>
+
+        <van-empty v-else-if="checkoutItems.length === 0" description="没有要结算的商品">
+          <p class="empty-hint">购物车可能是空的，或者商品已经被移除了。</p>
+          <div class="empty-actions">
+            <van-button round type="danger" @click="router.push('/cart')">去购物车看看</van-button>
+            <van-button round plain type="danger" @click="router.push('/drugs')">继续逛逛</van-button>
+          </div>
         </van-empty>
 
         <template v-else>
@@ -145,14 +196,15 @@ onMounted(() => {
           </div>
 
           <div class="order-items">
-            <div class="item" v-for="item in checkoutItems" :key="item.id">
-              <img :src="item.image_url || 'https://fastly.jsdelivr.net/npm/@vant/assets/cat.jpeg'" class="thumb"/>
+            <div class="item" v-for="item in checkoutItems" :key="item.id || item.product_id">
+              <img class="thumb" :src="imageUrl(item.image_url)" :alt="item.name || '商品'"
+                   loading="lazy" @error="onImageError"/>
               <div class="info">
-                <div class="name">{{ item.name }}</div>
+                <div class="name">{{ item.name || '商品已下架' }}</div>
                 <div class="spec">{{ item.spec }}</div>
               </div>
               <div class="price-info">
-                <div class="price">¥{{ item.price }}</div>
+                <div class="price">¥{{ (Number(item.price) || 0).toFixed(2) }}</div>
                 <div class="quantity">x{{ item.quantity }}</div>
               </div>
             </div>
@@ -161,14 +213,15 @@ onMounted(() => {
           <van-cell-group inset title="费用明细" class="fee-group">
             <van-cell title="商品总额" :value="`¥${totalPrice.toFixed(2)}`"/>
             <van-cell title="运费" value="免运费"/>
+            <van-cell title="支付方式" value="模拟支付（不产生真实扣款）"/>
           </van-cell-group>
         </template>
       </div>
 
       <!-- 底部支付栏 -->
-      <div class="bottom-pay-bar" v-if="checkoutItems.length > 0">
+      <div class="bottom-pay-bar" v-if="checkoutItems.length > 0 && !loading">
         <div class="total-info">
-          <span class="label">合计：</span>
+          <span class="label">共 {{ totalCount }} 件 · 合计：</span>
           <span class="price">¥{{ totalPrice.toFixed(2) }}</span>
         </div>
         <van-button
@@ -223,6 +276,29 @@ onMounted(() => {
     max-width: 800px;
     margin: 0 auto;
     padding: 16px;
+  }
+
+  /* 加载 / 报错 / 空态：三者都用同一块居中的容器，
+     避免「清单还没回来」和「真的没有商品」长得一模一样 */
+  .checkout-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 46vh;
+
+    .empty-hint {
+      margin: -8px 0 16px;
+      font-size: 13px;
+      color: #9ca3af;
+      text-align: center;
+    }
+
+    .empty-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
   }
 
   .address-card {
