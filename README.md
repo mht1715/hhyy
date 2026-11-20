@@ -610,6 +610,68 @@ Tab 与 URL 同步（`?tab=orders`），刷新/分享回到同一屏；桌面是
 **④ Logo 不是链接。** 顶栏左侧品牌名是个 `div`，在工作台里想回首页只能猜顶栏那几个入口。
 现在它是 `RouterLink to="/"`，任何页面、任何角色点了都回首页。
 
+### Tab 与 URL 同步（第四轮修复）
+
+> 症状：**从别的角色切到患者后，点 Tab 或卡片一律没反应；按 F5 刷新一下又好了。**
+
+根因不在点击，而在「谁有资格改地址栏」。几个工作台都在 `KeepAlive` 白名单里，
+切走以后组件只是 **deactivated**——它的 `watch` 还活着。于是点了患者的「订单」：
+
+```
+患者页写 ?tab=orders
+→ 后台那个被缓存的 DoctorView 也收到 route.query.tab 变化
+→ 它不认识 orders，按「非法 tab 收敛为 overview」的规则把地址栏改回 /patient
+→ 患者页的 ?tab 变空，active 跟着回到概览
+```
+
+用户看到的就是「点了没反应」，而刷新后 `KeepAlive` 是空的，没有第二个实例在后台改 URL——所以「刷新就好」
+反而成了最好的线索：**能自己恢复的 bug，多半是某个还活着的实例在覆盖状态。**
+
+修法是把这套逻辑收敛成一个组合式函数，并且立一条规矩：
+**只有「当前路由就是我这页」的实例才允许读写 `?tab=`；后台缓存的一律只看不动。**
+
+| 改动 | 作用 |
+| --- | --- |
+| `composables/useTabQuery.js` | 患者 / 医生工作台共用的 Tab↔URL 同步；`ownsRoute()` 守卫；非法值收敛只在当前页生效 |
+| 工作台 `onActivated` 补一次 `sync()` | 切角色回来时地址栏不带参数，把当前 Tab 写回去，刷新不会掉回概览 |
+| `AgentChat` 新增 `owns-query` | 被缓存（v-show）的对话不再把 `?c=` 写到 `/drugs`、`/orders` 上，也不再认领别的页面的 `?c=` |
+
+顺带修掉一个同族问题：切回医生 / 患者时 URL 不带 `?tab=`，页面却停在原来的 Tab 上——
+现在激活时会把 Tab 补回地址栏，地址栏和眼睛看到的一致。
+
+实测（CDP，390×844 与 1280×900）：医生→患者点「订单」→ `/patient?tab=orders`；
+患者→医生点「药品库」→ `/doctor?tab=drugs`；患者→管理员点「订单」→ `/admin?tab=orders`；
+切回医生仍停在「药品库」且地址栏自动补上 `?tab=drugs`；每次点击只产生一次 `replaceState`
+（修复前是「写进去 → 立刻被改回」）；非法 `?tab=bogus` 医生收敛为 `/doctor`、患者落回概览。
+
+
+### 站点信息集中配置
+
+要改站名、品牌、描述、主题色、演示账号、模拟收货地址、页脚，**只改 `frontend/src/config/site.js`**，
+不用再满项目搜字符串：
+
+| 改哪一项 | 立刻生效在哪 |
+| --- | --- |
+| `fullName` / `description` / `keywords` / `lang` / `themeColor` | `<title>`、`<meta description/keywords/theme-color>`、PWA `manifest.webmanifest` |
+| `brand` / `brandSuffix` / `version` | 顶栏 logo 文字、右上「MVP 演示」徽标、页面顶部说明条的标签 |
+| `titleTemplate` + `titles` | 浏览器标签页标题（按路由名取，如「患者工作台 · 花红医药 Agent」） |
+| `demo.accounts` / `demo.password` | 落地页「按角色体验」四张卡、登录弹窗的账号列表、`auth.login()` 的默认密码 |
+| `demoAddress` | 结算页与订单详情页的收货地址（两处共用一份，不会改一处忘一处） |
+| `login` / `guide` / `footer` | 登录弹窗文案、导览抽屉抬头、页脚技术栈与演示账号列表 |
+
+两条实现细节：
+
+- **构建期**：`vite.config.js` 直接 `import` 这个文件，PWA manifest 与 `index.html` 里的
+  `%SITE_TITLE%` 一类占位符都在构建时替换（dev 与 build 同一条管线）。所以改它会让 dev server 自动重启一次，是正常的。
+- **运行期**：浏览器标签页标题由 `router.afterEach` 按路由名设置，前端页面本身不存任何站点文案。
+
+后端也有对应的一份：`core/config.py` 的 `app_name` / `app_description` / `app_version`，
+`/docs` 抬头与 OpenAPI 的 `info` 直接读它（可用环境变量 `APP_NAME` 覆盖）。
+
+> 踩坑记录：占位符替换一开始写成 `/%SITE_([A-Z_]+)%/` 再拼回前缀，捕获组拿到的是 `TITLE` 而不是
+> `SITE_TITLE`，查表永远落空——**占位符原样出现在页面里，而构建日志一切正常**。
+> 这类「静默不生效」的替换，验证方式只能是打开页面看 `<title>`，不能只看 exit code。
+
 ### 状态保持、滚动与「返回顶部」
 
 - `App.vue` 用 `KeepAlive` 缓存列表型页面（工作台、药品广场、购物车、订单、记忆、会话、广场），
@@ -637,7 +699,7 @@ Tab 与 URL 同步（`?tab=orders`），刷新/分享回到同一屏；桌面是
 ### 游客落地页
 
 `/` 从「你好，游客」改成三段：真实数字（文档 13 / 切片 86 / Agent 4 / 召回率）→
-能力地图（4 张卡各通一个真实功能）→ 按角色一键登录（密码统一 `123456`，直接进工作台）。
+能力地图（4 张卡各通一个真实功能）→ 按角色一键登录（四个演示账号与密码都来自 `config/site.js`，直接进工作台）。
 统计接口挂了只显示「—」，不会白屏。
 
 ### 实测（2026-11-19，本机）
@@ -658,8 +720,11 @@ Tab 与 URL 同步（`?tab=orders`），刷新/分享回到同一屏；桌面是
 | `POST /api/orders/checkout`（`items` + `from_cart`） | 200 建单；购物车里只删掉结算过的那一行，另一行仍在（修复前勾选结算 = 整车下单且不清车） |
 | `PUT /api/cart/{id}` / `POST /checkout` 传 `quantity=0` | 均 422（修复前 200：同名 `CartUpdate` 覆盖掉了 `ge=1`） |
 | 浏览器点击实测（CDP，390×844） | logo → `/`；订单卡正文 → `/orders/{id}`；明细行 → `/product/{id}`；会话卡 → `/agents/…?c=…`；工作台「去结算」→ 结算页有商品；刷新后仍在；空购物车 → 明确空态 |
+| 切角色后点 Tab（CDP，390×844 / 1280×900） | 医生→患者点「订单」→ `/patient?tab=orders`；患者→医生点「药品库」→ `/doctor?tab=drugs`；患者→管理员点「订单」→ `/admin?tab=orders`；切回医生仍停「药品库」且补上 `?tab=drugs`；每次点击只产生 1 次 `replaceState`（修复前写进去就被后台缓存页改回） |
+| 站点信息（CDP + 产物检查） | `<title>花红医药 Agent 系统</title>`（dev 与 build 一致）；标签页按路由变「患者工作台 · 花红医药 Agent」；顶栏「花红agent（demo）」；登录弹窗/落地页 4 个账号同一份配置；结算页与订单详情地址一致；`manifest.webmanifest` 的 `name/short_name/description/lang/theme_color` 全来自配置 |
+| `/openapi.json` 的 `info` | `{"title":"花红医药 Agent 系统","description":"…","version":"MVP"}`（后端 `core/config.py`） |
 
-前端 `npm run build` 通过（103→122 precache 条目），后端 `ruff` 全绿，`pytest` 197 passed / 2 skipped。
+前端 `npm run build` 通过（122→123 precache 条目），后端 `ruff` 全绿，`pytest` 197 passed / 2 skipped。
 
 ---
 
@@ -696,6 +761,8 @@ backend/
 ├── serve.py            # 启动入口：Windows 上先设 SelectorEventLoop（checkpointer 依赖）
 └── tests/              # unit / integration / eval
 frontend/src/
+├── config/site.js         # 站点信息唯一来源：站名/品牌/描述/主题色/演示账号/收件地址/页脚/标题模板
+├── composables/           # useTabQuery（Tab↔?tab= 同步，带「当前路由才生效」守卫）、SSE、WS
 ├── components/workbench/  # 工作台骨架：Shell / TabBar / PanelCard / StatCard / FeatureHint / MvpBanner（M5）
 ├── components/guide/      # 导览抽屉（M5）
 ├── data/guide.js          # 导览内容：介绍 / 边界 / 思考 / 拓展 / 8 步路线（改话术只改这里）
