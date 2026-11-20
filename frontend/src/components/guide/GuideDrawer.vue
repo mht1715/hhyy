@@ -13,6 +13,7 @@ import {useRoute, useRouter} from 'vue-router'
 import {Check, Compass, RotateCcw, X} from 'lucide-vue-next'
 import {BOUNDARY, GUIDE_TABS, INTRO, NEXT_STEPS, THINKING, TOUR_STEPS} from '../../data/guide'
 import {closeGuide, setGuideTab, useGuideState} from '../../store/guide'
+import {siteConfig as site} from '../../config/site'
 
 const {state} = useGuideState()
 const router = useRouter()
@@ -91,8 +92,8 @@ const isDone = (id) => done.value.includes(id)
         <header class="guide-head">
           <div>
             <span class="guide-kicker">面试导览</span>
-            <h2>花红医药 Agent · MVP</h2>
-            <p>Agent 编排 + RAG 检索 + 输出治理，全链路可解释、可评估。</p>
+            <h2>{{ site.guide.title }}</h2>
+            <p>{{ site.guide.subtitle }}</p>
           </div>
           <button type="button" class="guide-close" aria-label="关闭" @click="closeGuide">
             <X :size="18"/>

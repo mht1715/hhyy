@@ -2,6 +2,7 @@ import {defineStore} from 'pinia'
 import {loginApi} from '../api/auth'
 import {useCartStore} from './cart'
 import {clearAuth, getRole, getToken, getUsername, setAuth} from '../utils/session'
+import {siteConfig as site} from '../config/site'
 
 export const useAuthStore = defineStore('auth', {
     state: () => ({
@@ -23,7 +24,7 @@ export const useAuthStore = defineStore('auth', {
         }
     },
     actions: {
-        async login(username, password = '123456') {
+        async login(username, password = site.demo.password) {
             const res = await loginApi(username, password)
             this.token = res.access_token
             this.username = res.username

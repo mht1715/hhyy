@@ -15,7 +15,7 @@ defineOptions({name: 'DoctorView'})
  * 2. 咨询面板一旦挂载就常驻（v-show），换 Tab 不会断开 SSE 流式回答；
  * 3. 刷新只刷新当前 Tab；咨询流由 AgentChat 自己维护，刷新不打断进行中的回答。
  */
-import {computed, onMounted, ref, watch} from 'vue'
+import {computed, onActivated, onMounted, ref, watch} from 'vue'
 import {useRoute, useRouter} from 'vue-router'
 import dayjs from 'dayjs'
 import {showConfirmDialog, showToast} from 'vant'
@@ -49,6 +49,7 @@ import {fetchConversations} from '../api/support'
 import {createProductApi, deleteProductApi, getProductsApi, updateProductApi} from '../api/product'
 import {useAuthStore} from '../store/auth'
 import {openGuide} from '../store/guide'
+import {useTabQuery} from '../composables/useTabQuery'
 
 /* ------------------------------------------------------------------ *
  * 常量与通用小工具
@@ -94,28 +95,25 @@ const auth = useAuthStore()
  * Tab 状态：组件内 state 负责切换，URL 只做同步（刷新 / 分享能回到原位）
  * ------------------------------------------------------------------ */
 
-const rawTabFromRoute = () => {
-  const raw = route.query.tab
-  const value = Array.isArray(raw) ? raw[0] : raw
-  return typeof value === 'string' ? value : ''
-}
-
-const active = ref(normalizeTab(rawTabFromRoute()))
+const active = ref('overview')
 // 咨询面板要保活，但也没必要一进工作台就建立会话上下文：第一次切过去才开始挂载
-const consultVisited = ref(active.value === 'consult')
+const consultVisited = ref(false)
 
-// 用 replace 而不是 push：Tab 切换是同一屏换数据，不该在浏览器历史里堆一串记录
-const writeTabToRoute = (tab) => {
-  const current = rawTabFromRoute()
-  if ((tab === 'overview' && !current) || current === tab) return
-  const query = {...route.query}
-  if (tab === 'overview') {
-    delete query.tab
-  } else {
-    query.tab = tab
-  }
-  router.replace({query}).catch(() => {})
-}
+// Tab ↔ ?tab= 的同步交给 useTabQuery：只有「当前路由就是 /doctor」的实例能改地址栏。
+// 之前本页自己 watch(route.query.tab)，被 KeepAlive 缓存后仍会在别的页面上
+// 把认不出的 tab「收敛」成 overview，顺手清掉患者页的 ?tab=（点 Tab 像没反应）。
+const {readTab: readTabFromRoute, write: writeTabToRoute, sync: syncTabToUrl} = useTabQuery({
+  path: '/doctor',
+  tabs: TAB_KEYS,
+  fallback: 'overview',
+  active,
+  converge: true
+})
+active.value = readTabFromRoute()
+consultVisited.value = active.value === 'consult'
+
+// 咨询面板的 ?c= 只在「人在 /doctor 的咨询 Tab 上」时归它维护（工作台被缓存后它仍然活着）
+const ownsConsultQuery = computed(() => active.value === 'consult' && route.path === '/doctor')
 
 const switchTab = (key) => {
   const next = normalizeTab(key)
@@ -580,28 +578,21 @@ const loadAll = async () => {
  * 同步与初始化
  * ------------------------------------------------------------------ */
 
+// 切 Tab 时只为新 Tab 准备数据；URL 由 useTabQuery 负责
 watch(active, (tab) => {
-  writeTabToRoute(tab)
   ensureTabData(tab)
-})
-
-// 浏览器前进 / 后退或外部改 query 时，让组件状态跟上 URL
-watch(() => route.query.tab, () => {
-  const raw = rawTabFromRoute()
-  const next = normalizeTab(raw)
-  if (next !== active.value) {
-    active.value = next
-    return
-  }
-  // 后退回到一个手改的非法值时，也顺手把地址栏收敛掉
-  if (raw && raw !== next) writeTabToRoute(next)
 })
 
 onMounted(() => {
   // 手改出来的非法 ?tab 先收敛回 overview，否则刷新后地址栏会一直停在坏值
-  const raw = rawTabFromRoute()
-  if (raw && raw !== active.value) writeTabToRoute(active.value)
+  // （useTabQuery 只在 route 变化时收敛，首帧要靠这里补一次）
+  writeTabToRoute(active.value)
   ensureTabData(active.value)
+})
+
+// 切角色回来看的是缓存实例：地址栏是不带参数的 /doctor，把当前 Tab 补回去
+onActivated(() => {
+  syncTabToUrl()
 })
 </script>
 
@@ -877,7 +868,7 @@ onMounted(() => {
       />
 
       <div class="consult-chat">
-        <AgentChat v-if="consultVisited" agent-code="drug_consult"/>
+        <AgentChat v-if="consultVisited" agent-code="drug_consult" :owns-query="ownsConsultQuery"/>
       </div>
     </div>
 

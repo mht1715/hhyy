@@ -21,7 +21,12 @@ const props = defineProps({
   context: {type: Object, default: null},
   title: {type: String, default: ''},
   quickQuestions: {type: Array, default: () => []},
-  compact: {type: Boolean, default: false}
+  compact: {type: Boolean, default: false},
+  // 是否由本实例负责维护地址栏的 ?c=（会话 id）。
+  // 工作台里的对话是 v-show 保活的：切到别的页面后它仍然活着一整份，
+  // 如果不加这个开关，它会把 ?c= 写到 /drugs、/orders 上，也会把别的页面的
+  // ?c= 当成「要接回的会话」。所以由父组件按「当前是不是我在前台」传进来。
+  ownsQuery: {type: Boolean, default: true}
 })
 
 const isDev = import.meta.env.DEV
@@ -206,6 +211,8 @@ watch(() => socketError.value, (value) => {
  * ------------------------------------------------------------------ */
 
 const syncUrl = (cid) => {
+  // 不在前台就不写地址栏：见 props.ownsQuery 的注释
+  if (!props.ownsQuery) return
   const current = route.query.c ? String(route.query.c) : ''
   const next = cid ? String(cid) : ''
   if (current === next) return
@@ -220,6 +227,7 @@ watch(conversationId, (value) => syncUrl(value))
 // 地址栏的 c 变了（例如从「我的会话」点了另一条）：接回那段对话。
 // 自己写 URL 时 c 和当前会话一致，会在这里被挡掉，不会自激重载。
 watch(() => route.query.c, (value) => {
+  if (!props.ownsQuery) return
   const cid = value ? String(value) : ''
   if (!cid || cid === conversationId.value) return
   restoreConversation(cid)

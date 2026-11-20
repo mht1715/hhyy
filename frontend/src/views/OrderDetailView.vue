@@ -7,6 +7,7 @@ import {ArrowLeft, MapPin} from 'lucide-vue-next'
 import {showToast, showConfirmDialog} from 'vant'
 import OrderItem from '../components/order/OrderItem.vue'
 import {goBackOr} from '../utils/nav'
+import {siteConfig as site} from '../config/site'
 
 const route = useRoute()
 const router = useRouter()
@@ -101,10 +102,10 @@ onMounted(loadDetail)
         </div>
         <div class="address-info">
           <div class="user-info">
-            <span class="name">张药师</span>
-            <span class="phone">138****8888</span>
+            <span class="name">{{ site.demoAddress.name }}</span>
+            <span class="phone">{{ site.demoAddress.phone }}</span>
           </div>
-          <div class="detail">广西壮族自治区南宁市青秀区民族大道 123 号 花红药业大厦 8 楼</div>
+          <div class="detail">{{ site.demoAddress.detail }}</div>
         </div>
       </div>
 

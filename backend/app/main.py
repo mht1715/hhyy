@@ -59,7 +59,13 @@ async def lifespan(app: FastAPI):
     await close_checkpointer()
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    lifespan=lifespan,
+    # 站点信息统一在 core/config.py 里（可用环境变量 APP_NAME 等覆盖）
+    title=settings.app_name,
+    description=settings.app_description,
+    version=settings.app_version,
+)
 
 # 配置 CORS（允许前端跨域请求）
 app.add_middleware(

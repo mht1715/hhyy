@@ -17,6 +17,7 @@ import {ArrowLeft, MapPin} from 'lucide-vue-next'
 import {checkoutApi} from '../api/order'
 import {goBackOr} from '../utils/nav'
 import {imageUrl, onImageError} from '../utils/image'
+import {siteConfig as site} from '../config/site'
 import {
   clearCheckout,
   checkoutTotal,
@@ -44,11 +45,7 @@ const checkoutItems = computed(() => selection.value)
 const totalPrice = computed(() => checkoutTotal(selection.value))
 const totalCount = computed(() => selection.value.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0))
 
-const address = {
-  name: '张药师',
-  phone: '138****8888',
-  detail: '广西壮族自治区南宁市青秀区民族大道 123 号 花红药业大厦 8 楼'
-}
+const address = site.demoAddress
 
 /**
  * 清单与「最新购物车」对齐：清单里还留在车里的行，用车上最新的价格/数量，

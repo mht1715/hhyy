@@ -1,10 +1,18 @@
 <!doctype html>
-<html lang="en">
+<!--
+  站点信息不写死在这里：标题 / 描述 / 关键词 / 主题色都在 src/config/site.js，
+  由 vite.config.js 里的 site-meta 插件在 dev 与 build 时替换 %SITE_*% 占位符。
+-->
+<html lang="%SITE_LANG%">
 <head>
     <meta charset="UTF-8"/>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg"/>
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-    <title>frontend</title>
+    <meta name="description" content="%SITE_DESC%"/>
+    <meta name="keywords" content="%SITE_KEYWORDS%"/>
+    <meta name="theme-color" content="%SITE_THEME%"/>
+    <title>%SITE_TITLE%</title>
 </head>
 <body>
 <div id="app"></div>

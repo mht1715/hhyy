@@ -1,6 +1,7 @@
 import {createRouter, createWebHistory} from 'vue-router'
 import {canAccess, resolveHomePath} from '../utils/permission'
 import {getRole, getToken} from '../utils/session'
+import {siteConfig} from '../config/site'
 
 const routes = [
     {
@@ -170,6 +171,10 @@ router.beforeEach((to, from) => {
 })
 
 router.afterEach((to, from) => {
+    // 浏览器标签页标题也来自 site.js：页面名按路由 name 取，没登记的用站点全名
+    const page = to.name ? siteConfig.titles[to.name] : ''
+    document.title = page ? siteConfig.titleTemplate.replace('{page}', page) : siteConfig.fullName
+
     // 同一页面只换 query（切 Tab）不该跳回旧位置
     if (to.path === from.path) return
     const remembered = scrollMemory.get(to.fullPath)

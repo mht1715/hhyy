@@ -43,6 +43,7 @@ import OrderCard from '../components/order/OrderCard.vue'
 import CartItem from '../components/cart/CartItem.vue'
 import {fetchMyWorkbench} from '../api/workbench'
 import {writeCheckoutItems} from '../utils/checkout'
+import {useTabQuery} from '../composables/useTabQuery'
 import {cancelOrderApi, getMyOrdersApi, receiveOrderApi} from '../api/order'
 import {clearCartApi, getCartApi, removeCartItemApi, updateCartQuantityApi} from '../api/cart'
 import {clearMemory, deleteMemory, fetchMemory, setMemoryEnabled} from '../api/memory'
@@ -177,25 +178,19 @@ const memorySourceText = (item) => {
  * Tab 与 URL：?tab=xxx，切换用 replace，不污染浏览器历史
  * ------------------------------------------------------------------ */
 
-const readTabFromUrl = () => {
-  const raw = Array.isArray(route.query.tab) ? route.query.tab[0] : route.query.tab
-  const key = String(raw || '')
-  return TAB_KEYS.includes(key) ? key : 'overview'
-}
+const active = ref('overview')
 
-const active = ref(readTabFromUrl())
-
-const writeTabToUrl = (key) => {
-  const raw = Array.isArray(route.query.tab) ? route.query.tab[0] : route.query.tab
-  const current = raw === undefined ? '' : String(raw)
-  const next = key === 'overview' ? '' : key
-  if (current === next) return
-  // 展开 route.query 是为了不冲掉 AgentChat 自己维护的 ?c=（会话 id）
-  const query = {...route.query}
-  if (next) query.tab = next
-  else delete query.tab
-  router.replace({query}).catch(() => {})
-}
+// Tab ↔ ?tab= 的同步统一交给 useTabQuery：它只让「当前路由就是 /patient」的实例
+// 改地址栏。之前这里是本页自己 watch(route.query.tab)，被 KeepAlive 缓存的旧实例
+// 会在别的页面上把 ?tab= 改掉（切角色到患者后点 Tab 看起来没反应，就是这个原因）。
+const {readTab: readTabFromUrl, sync: syncTabToUrl} = useTabQuery({
+  path: '/patient',
+  tabs: TAB_KEYS,
+  fallback: 'overview',
+  active
+})
+// 首帧直接按地址栏落 Tab（深链 ?tab=orders 要准），不能等 watch 触发
+active.value = readTabFromUrl()
 
 // 概览是默认 Tab，URL 上就不留参数了；其它 Tab 一律写进 ?tab=
 const tabTarget = (key) => ({path: '/patient', query: key === 'overview' ? {} : {tab: key}})
@@ -708,6 +703,11 @@ const goMemoryPage = () => router.push('/me/memory')
 
 const chatAgent = ref('drug_consult')
 
+// 地址栏的 ?c= 归谁维护：只有「人在 /patient 的问诊 Tab 上」时才归这段对话。
+// 工作台是 KeepAlive 缓存的，人走了以后对话组件还活着（流式回答要继续），
+// 但它不该再去改别的页面的 URL。
+const ownsChatQuery = computed(() => active.value === 'chat' && route.path === '/patient')
+
 const switchAgent = async (code) => {
   if (!code || chatAgent.value === code) return
   // URL 上的 ?c= 属于上一个助手的会话；不清掉的话，新挂载的 AgentChat
@@ -816,6 +816,8 @@ onMounted(async () => {
  */
 let activatedOnce = false
 onActivated(async () => {
+  // 切角色过来时地址栏是不带参数的 /patient，把当前 Tab 补回去（否则刷新会掉回概览）
+  syncTabToUrl()
   if (!activatedOnce) {
     activatedOnce = true // 首次进入由 onMounted 负责，避免重复请求
     return
@@ -827,18 +829,11 @@ onActivated(async () => {
   await Promise.allSettled(tasks)
 })
 
-// Tab 切换：写 URL + 懒加载该 Tab 的数据。
+// Tab 切换：懒加载该 Tab 的数据（URL 同步在 useTabQuery 里做）。
 // 购物车每次都重拉：它会被别的页面改（广场加购、下单成功清空），
 // 拿着上一次的旧行去结算，等于把已经买过的商品再下一单。
 watch(active, (key) => {
-  writeTabToUrl(key)
   activateTab(key, key === 'cart')
-})
-
-// 地址栏的 ?tab= 变了（例如点了指标卡），把页面切过去
-watch(() => route.query.tab, () => {
-  const key = readTabFromUrl()
-  if (key !== active.value) active.value = key
 })
 </script>
 
@@ -1040,7 +1035,7 @@ watch(() => route.query.tab, () => {
         </button>
       </div>
 
-      <AgentChat :key="chatAgent" :agent-code="chatAgent" compact/>
+      <AgentChat :key="chatAgent" :agent-code="chatAgent" :owns-query="ownsChatQuery" compact/>
     </div>
 
     <!-- ------------------------------ 订单 ------------------------------ -->

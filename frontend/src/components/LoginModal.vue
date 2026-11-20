@@ -3,17 +3,24 @@ import {useAuthStore} from '../store/auth'
 import {useRouter, useRoute} from 'vue-router' // 补充引入 useRoute
 import {X, ShieldCheck, Stethoscope, User, Headphones} from 'lucide-vue-next'
 import {showToast} from 'vant' // 建议把 alert 换成 Vant 的 Toast
+import {siteConfig as site} from '../config/site'
 
 const auth = useAuthStore()
 const router = useRouter()
 const route = useRoute() // 实例化 route
 
-const quickLogin = async (username, rolePath) => {
+// 账号列表来自 src/config/site.js（落地页「按角色体验」用的是同一份），
+// 这里只负责图标与配色——它们是组件和视觉细节，不属于站点信息
+const ROLE_ICONS = {admin: ShieldCheck, doctor: Stethoscope, patient: User, support: Headphones}
+const ROLE_BG = {admin: 'bg-red', doctor: 'bg-blue', patient: 'bg-green', support: 'bg-purple'}
+const accounts = site.demo.accounts
+
+const quickLogin = async (account) => {
   try {
-    await auth.login(username)
-    // 使用 route.path 判断当前是否在游客首页
+    await auth.login(account.username)
+    // 用 route.path 判断当前是否在游客首页
     if (route.path === '/') {
-      router.push(rolePath)
+      router.push(account.homePath)
     }
   } catch (err) {
     showToast({type: 'fail', message: '登录失败，请确保后端服务已启动'})
@@ -29,51 +36,22 @@ const quickLogin = async (username, rolePath) => {
           <X :size="20"/>
         </button>
 
-        <h2 class="title">选择体验身份</h2>
-        <p class="subtitle">系统内置了四种角色，点击即可快速登录体验对应权限（客服与患者建议分两个标签页/窗口）</p>
+        <h2 class="title">{{ site.login.title }}</h2>
+        <p class="subtitle">{{ site.login.subtitle }}</p>
 
         <div class="account-list">
-          <!-- 管理员 -->
-          <div class="account-card" @click="quickLogin('admin', '/admin')">
-            <div class="icon-wrapper bg-red">
-              <ShieldCheck :size="28" color="white"/>
+          <div
+              v-for="account in accounts"
+              :key="account.username"
+              class="account-card"
+              @click="quickLogin(account)"
+          >
+            <div class="icon-wrapper" :class="ROLE_BG[account.role]">
+              <component :is="ROLE_ICONS[account.role] || User" :size="28" color="white"/>
             </div>
             <div class="info">
-              <div class="role-name">系统管理员</div>
-              <div class="username">admin</div>
-            </div>
-          </div>
-
-          <!-- 医生 -->
-          <div class="account-card" @click="quickLogin('doctor', '/doctor')">
-            <div class="icon-wrapper bg-blue">
-              <Stethoscope :size="28" color="white"/>
-            </div>
-            <div class="info">
-              <div class="role-name">平台医生</div>
-              <div class="username">doctor</div>
-            </div>
-          </div>
-
-          <!-- 患者 -->
-          <div class="account-card" @click="quickLogin('patient', '/patient')">
-            <div class="icon-wrapper bg-green">
-              <User :size="28" color="white"/>
-            </div>
-            <div class="info">
-              <div class="role-name">普通患者</div>
-              <div class="username">patient</div>
-            </div>
-          </div>
-
-          <!-- 客服坐席（M3）：进客服工作台 -->
-          <div class="account-card" @click="quickLogin('support', '/support')">
-            <div class="icon-wrapper bg-purple">
-              <Headphones :size="28" color="white"/>
-            </div>
-            <div class="info">
-              <div class="role-name">客服坐席</div>
-              <div class="username">support</div>
+              <div class="role-name">{{ account.title }}</div>
+              <div class="username">{{ account.username }}</div>
             </div>
           </div>
         </div>

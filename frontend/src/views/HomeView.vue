@@ -33,6 +33,7 @@ import {fetchPublicStats} from '../api/workbench'
 import {useAuthStore} from '../store/auth'
 import {resolveHomePath} from '../utils/permission'
 import {openGuide} from '../store/guide'
+import {siteConfig as site} from '../config/site'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -100,12 +101,21 @@ const CAPABILITIES = [
   }
 ]
 
-const ROLES = [
-  {role: 'patient', username: 'patient', title: '患者', desc: '问药、查单、看记忆', icon: Users, color: '#059669', bg: '#ecfdf5'},
-  {role: 'doctor', username: 'doctor', title: '医生', desc: '药品资料 + AI 辅助', icon: ShieldCheck, color: '#2563eb', bg: '#eff6ff'},
-  {role: 'support', username: 'support', title: '客服', desc: '接管队列、人工回复', icon: Headphones, color: '#7c3aed', bg: '#f5f3ff'},
-  {role: 'admin', username: 'admin', title: '管理员', desc: '指标、治理、评估', icon: Database, color: '#dc2626', bg: '#fef2f2'}
-]
+// 角色卡片 = site.js 里的演示账号 + 本页自己的图标与配色。
+// 图标是组件、配色是视觉细节，不适合塞进「站点信息」，所以只把账号数据放过去。
+const ROLE_ICONS = {patient: Users, doctor: ShieldCheck, support: Headphones, admin: Database}
+const ROLE_TONES = {
+  patient: {color: '#059669', bg: '#ecfdf5'},
+  doctor: {color: '#2563eb', bg: '#eff6ff'},
+  support: {color: '#7c3aed', bg: '#f5f3ff'},
+  admin: {color: '#dc2626', bg: '#fef2f2'}
+}
+
+const ROLES = site.demo.accounts.map((item) => ({
+  ...item,
+  icon: ROLE_ICONS[item.role] || Users,
+  ...(ROLE_TONES[item.role] || {color: '#374151', bg: '#f3f4f6'})
+}))
 
 const FLOW = [
   {title: '路由', desc: 'Supervisor 选 Agent，带历史与指代改写'},
@@ -124,7 +134,7 @@ const enterAs = async (item) => {
     if (!auth.isLoggedIn || auth.username !== item.username) {
       await auth.login(item.username)
     }
-    router.push(resolveHomePath(item.role))
+    router.push(item.homePath || resolveHomePath(item.role))
   } catch (e) {
     showToast((e && e.message) || '演示账号登录失败，请确认后端已启动')
   } finally {
@@ -255,7 +265,7 @@ const goWorkbench = () => {
       <section class="section">
         <header class="section-head">
           <h2>按角色体验</h2>
-          <p>点一下即用演示账号登录（密码统一 123456），直接进对应工作台。</p>
+          <p>点一下即用演示账号登录（密码统一 {{ site.demo.password }}），直接进对应工作台。</p>
         </header>
         <div class="role-grid">
           <button
@@ -302,9 +312,9 @@ const goWorkbench = () => {
       </section>
 
       <footer class="home-foot">
-        <span>FastAPI · LangGraph · Milvus · PostgreSQL · Redis · Vue 3</span>
+        <span>{{ site.footer.stack.join(' · ') }}</span>
         <span class="dot">·</span>
-        <span>演示账号 admin / doctor / patient / support</span>
+        <span>演示账号 {{ site.demo.accounts.map((item) => item.username).join(' / ') }}</span>
       </footer>
     </div>
   </div>

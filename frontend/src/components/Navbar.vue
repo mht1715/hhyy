@@ -5,6 +5,7 @@ import {useRoute, useRouter} from 'vue-router'
 import {Bot, Brain, ChevronDown, Headphones, Hexagon, LayoutDashboard, LogOut, Pill, RefreshCw, UserCircle} from 'lucide-vue-next'
 import {resolveHomePath} from '../utils/permission'
 import {openGuide} from '../store/guide'
+import {siteConfig as site} from '../config/site'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -56,7 +57,8 @@ const goSupport = () => {
 }
 
 const roleColorMap = {admin: '#ef4444', doctor: '#3b82f6', patient: '#10b981', support: '#8b5cf6'}
-const roleNameMap = {admin: '管理员', doctor: '医生', patient: '患者', support: '客服'}
+// 角色中文名与演示账号都来自 src/config/site.js，改一个地方全站生效
+const roleNameMap = Object.fromEntries(site.demo.accounts.map((item) => [item.role, item.title]))
 </script>
 
 <template>
@@ -65,7 +67,7 @@ const roleNameMap = {admin: '管理员', doctor: '医生', patient: '患者', su
          面试官在工作台里想回首页只能猜顶栏那几个入口） -->
     <RouterLink to="/" class="left-brand" aria-label="返回首页">
       <Hexagon color="#ef4444" :size="28" fill="#ef4444"/>
-      <span class="brand-name">花红<span class="brand-sub">agent（demo）</span></span>
+      <span class="brand-name">{{ site.brand }}<span class="brand-sub">{{ site.brandSuffix }}</span></span>
     </RouterLink>
 
     <nav class="nav-links">
@@ -82,7 +84,7 @@ const roleNameMap = {admin: '管理员', doctor: '医生', patient: '患者', su
         <span>Agent 广场</span>
       </RouterLink>
       <button type="button" class="mvp-chip" title="这个版本在演示什么" @click="openGuide('intro')">
-        MVP 演示
+        {{ site.version }} 演示
       </button>
     </nav>
 

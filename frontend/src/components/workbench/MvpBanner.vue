@@ -8,6 +8,7 @@
 import {ref} from 'vue'
 import {X} from 'lucide-vue-next'
 import {openGuide} from '../../store/guide'
+import {siteConfig as site} from '../../config/site'
 
 const KEY = 'hhyy.dismissed.mvp'
 const dismissed = ref(false)
@@ -29,7 +30,7 @@ const close = () => {
 
 <template>
   <div v-if="!dismissed" class="mvp-banner">
-    <span class="mvp-tag">MVP</span>
+    <span class="mvp-tag">{{ site.version }}</span>
     <p>
       演示版，重点展示 <b>Agent 编排</b> 与 <b>RAG 检索</b>：
       多 Agent 路由、引用溯源、拒答边界、转人工、可评估。

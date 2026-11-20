@@ -11,6 +11,14 @@ ENV_FILE = BASE_DIR / ".env"
 
 
 class Settings(BaseSettings):
+    # ── 站点信息（显示在 /docs 的抬头与 OpenAPI 里，改这里不用动代码）──
+    app_name: str = "花红医药 Agent 系统"
+    app_description: str = (
+        "面向医药电商场景的多 Agent + RAG 平台："
+        "Agent 配置化编排、知识库检索带引用、三层记忆、转人工闭环，以及一套可评估的输出治理。"
+    )
+    app_version: str = "MVP"
+
     # ── 应用 ──
     app_env: str = "development"
     log_level: str = "INFO"
@@ -73,8 +81,7 @@ class Settings(BaseSettings):
     # --- 人工介入 ---
     handoff_queue_timeout: int = 90
     # 连续 N 次拒答 / N 轮负面情绪 → 建议转人工（PRD FR5.1）
-    handoff_refusal_streak: int = 2
-    # WebSocket 短期 ticket 有效期（先 HTTP 拿 ticket，再连 WS）
+    handoff_refusal_streak: int = 2    # WebSocket 短期 ticket 有效期（先 HTTP 拿 ticket，再连 WS）
     ws_ticket_ttl: int = 60
     # 服务端心跳间隔：客户端 90s 收不到任何帧就该重连
     ws_heartbeat_seconds: int = 25
@@ -99,9 +106,6 @@ class Settings(BaseSettings):
     # 多 Agent 汇总是否再花一次模型调用做「语言融合」。默认关：
     # 确定性合并（代码拼来源）更快、也不会把 A 的结论说成 B 的。
     chat_llm_synthesis: bool = False
-
-    # --- 人工介入 ---
-    handoff_queue_timeout: int = 90
 
     # --- Langfuse（可观测）---
     # 三个值任一缺失即视为未启用，服务照常运行，仅不做上报
